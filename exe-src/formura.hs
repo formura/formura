@@ -42,6 +42,13 @@ process fn = do
 codegen :: WithCommandLineOption => Program -> IO ()
 codegen sugarcoated_prog = do
   prog <- desugar sugarcoated_prog
+  when (?commandLineOption ^. verbose) $ do
+    putStrLn "## AST"
+    print sugarcoated_prog
+    putStrLn ""
+    putStrLn "## Desugared AST"
+    print prog
+    putStrLn ""
 
   omProg <- genOMProgram prog
 

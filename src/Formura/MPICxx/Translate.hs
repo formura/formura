@@ -1156,6 +1156,8 @@ joinSubroutines :: WithCommandLineOption => CProgram -> IO CProgram
 joinSubroutines cprog0 = do
   when (?commandLineOption ^. verbose) $ do
     putStrLn $ "## Subroutine Analysis"
+    putStrLn "### cprog0"
+    print cprog0
     when (elem "show-subroutines" $ ?commandLineOption ^. auxFlags) $ do
        forM_ (zip [1..] subs1) $ \(i, ss) -> do
          forM_ (zip [1..] ss) $ \(j, s) -> do
@@ -1173,6 +1175,9 @@ joinSubroutines cprog0 = do
       -- forM_ (take 2 ss) $ T.putStrLn . C.pretty
 
   cprog1 <- useSubroutineCalls subroutineNameMap cprog0
+  when (?commandLineOption ^. verbose) $ do
+    putStrLn "### cprog1"
+    print cprog1
 
   return $ cprog1
     & headerFileContent %~ (C.replace "/*INSERT SUBROUTINES HERE*/" hxxSubroutineDecls)
