@@ -5,7 +5,6 @@ module Formura.NumericalConfig where
 import           Cases (snakify)
 import           Control.Lens
 import           Data.Aeson.TH
-import           Data.Char
 import           Data.Data
 import           Data.List
 import qualified Data.Map as M

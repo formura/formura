@@ -11,7 +11,7 @@ import "mtl"     Control.Monad.RWS
 import           Data.Char (toUpper, isAlphaNum)
 import           Data.Foldable (toList)
 import           Data.Function (on)
-import           Data.List (zip4, isPrefixOf, sort, groupBy, sortBy)
+import           Data.List (zip4, isPrefixOf, sortBy)
 import qualified Data.Map as M
 import           Data.Maybe
 import           Data.String
@@ -25,7 +25,7 @@ import           System.FilePath.Lens
 import           System.Process
 import           Text.Trifecta (failed, raiseErr)
 
-import           Formura.Utilities (readYamlDef, zipWithFT)
+import           Formura.Utilities (zipWithFT)
 import qualified Formura.Annotation as A
 import           Formura.Annotation.Boundary
 import           Formura.Annotation.Representation
@@ -61,6 +61,7 @@ data NamingState = NamingState
   }
 makeClassy ''NamingState
 
+defaultNamingState :: NamingState
 defaultNamingState = NamingState
   { _alreadyGivenNames = S.empty
   , _alreadyGivenLocalNames = S.empty
@@ -199,7 +200,6 @@ genFreeName' isGlobal ident = do
 setNumericalConfig :: WithCommandLineOption => TranM ()
 setNumericalConfig = do
   dim <- view dimension
-  ivars <- view axesNames
   prog <- use theProgram
 
   let nc = prog ^. programNumericalConfig
@@ -360,7 +360,6 @@ nameArrayResource rsc = case rsc of
     return ret
   _ -> do
     sharing <- use planResourceSharing
-    dict <- use planResourceNames
     sdict <- use planSharedResourceNames
     ret <- case M.lookup rsc sharing of
       Nothing -> return "" -- These are OMNode for Store instruction; do not need array decl
@@ -427,8 +426,6 @@ tellArrayDecls :: TranM ()
 tellArrayDecls = do
   aalloc <- use planArrayAlloc
   commonBox <- use planSharedResourceExtent
-  let szpt = foldMap (C.brackets . C.show) (drop 1 $ toList sz)
-      sz = commonBox ^.upperVertex - commonBox ^. lowerVertex
 
   forM_ (M.toList aalloc) $ \(rsc, box0) -> do
     name <- nameArrayResource rsc
@@ -438,7 +435,7 @@ tellArrayDecls = do
     tellResourceDecl name rsc box1
 
   falloc <- use planFacetAlloc
-  forM_ (M.toList falloc) $ \(fr@(f, rs)) -> do
+  forM_ (M.toList falloc) $ \(f, rs) -> do
     tellFacetDecl f rs
     name <- nameFacetRequest f
     tellMPIRequestDecl name
@@ -531,19 +528,14 @@ genMMInstruction ir0 mminst = do
       genRefCnt (LoadExtent _) = []
       genRefCnt (LoadCursor _ _) = []
       genRefCnt (LoadCursorStatic _ _) = []
-
-      doesSpine :: MMNodeID -> Bool
-      doesSpine nid =  case A.viewMaybe  $ fromJust $ M.lookup nid mminst  of
-        Just (NBUSpine False) -> False
-        _ -> True
-
+      genRefCnt _ = []
 
       doesBind :: MMNodeID -> Bool
       doesBind nid = doesBind' (refCount nid) (fromJust (M.lookup nid mminst) ^. nodeInst)
 
       doesBind' :: Int -> MicroInstruction -> Bool
       doesBind' _ (Imm _) = False
-      doesBind' _ (Store _ x) = False
+      doesBind' _ (Store _ _) = False
       doesBind' n _ = n >= exprBindSize nc
       -- TODO : Implement CSE and then reduce n
 
@@ -629,9 +621,7 @@ genMMInstruction ir0 mminst = do
       x -> raiseErr $ failed $ "mpicxx codegen unimplemented for keyword: " ++ show x
 
   nmap <- use nodeIDtoLocalName
-  let (tailID, _) = M.findMax mminst
-      Just tailName = M.lookup tailID nmap
-      retPairs = [ (tailName,c)
+  let retPairs = [ (tailName,c)
                  | (i,c) <- mmFindTailIDs mminst
                  , tailName <- maybeToList $ M.lookup i nmap]
 
@@ -704,7 +694,7 @@ genComputation (ir0, nid0) destRsc0 = do
       loopTos = regionBox^.upperVertex - marginBox^.lowerVertex
 
       mmInst :: MMInstruction
-      Just (Node mmInst typ annot) = M.lookup nid0 stepGraph
+      Just (Node mmInst typ _) = M.lookup nid0 stepGraph
 
   loopIndexOffset .= marginBox^. lowerVertex
 
@@ -745,7 +735,7 @@ genComputation (ir0, nid0) destRsc0 = do
           lhsName <- nameArrayResource (ResourceStatic n ())
           genGrid True lhsName
         _ -> return (M.empty, "// void")
-    GridType _ typ -> do
+    GridType _ _ -> do
       lhsName <- nameArrayResource (ResourceOMNode nid0 ir0)
       genGrid False (C.typedHole rscPtrTypename (C.toText lhsName))
 
@@ -818,7 +808,6 @@ genMPISendRecvCode f = do
   reqName <- nameFacetRequest f
   facetNameSend <- nameFacet f Send
   facetNameRecv <- nameFacet f Recv
-  facetTypeName <- nameFacet f SendRecv
   mpiTagDict <- use planFacetMPITag
 
 
@@ -853,7 +842,6 @@ genMPIWaitCode :: (?ncOpts :: [String]) => FacetID -> TranM (FortranBinding, C.S
 genMPIWaitCode f = do
   reqName <- nameFacetRequest f
   let
-      dmpi = f ^. facetDeltaMPI
       mpiWait :: C.Src
       mpiWait = C.unwords $
           ["call mpi_wait(" <> reqName <>  ",MPI_STATUS_IGNORE,mpi_err)\n"]
@@ -904,7 +892,7 @@ genDistributedProgram insts0 = do
       grp :: [DistributedInst] -> [DistributedInst] -> [[DistributedInst]]
       grp accum [] = [reverse accum]
       grp [] (x:xs) = grp [x] xs
-      grp accum@(a:aa) (x:xs)
+      grp accum@(a:_) (x:xs)
         | sticks a x = grp (x:accum) xs
         | otherwise  = reverse accum : grp [] (x:xs)
 
@@ -973,7 +961,7 @@ collaboratePlans = do
         foldr1 (|||)
         [ b
         | p <- M.elems plans0
-        , (ResourceStatic snName (), b)  <- M.toList $ p ^. planArrayAlloc
+        , (ResourceStatic _ (), b)  <- M.toList $ p ^. planArrayAlloc
         ]
 
       newPlans = M.map rewritePlan plans0
@@ -983,14 +971,14 @@ collaboratePlans = do
         & planArrayAlloc %~ M.mapWithKey go
         -- & planSharedResourceExtent .~ commonRscBox -- TODO: Flipping the comment of this line changes the behavior.
 
-      go (ResourceStatic snName ()) _ = commonStaticBox
+      go (ResourceStatic _ ()) _ = commonStaticBox
       go _ b = b
 
-      commonRscBox =
-        upperVertex %~ (+nbuMargin) $
-        foldr1 (|||)
-        [ p ^. planSharedResourceExtent
-        | p <- M.elems plans0]
+      -- commonRscBox =
+      --   upperVertex %~ (+nbuMargin) $
+      --   foldr1 (|||)
+      --   [ p ^. planSharedResourceExtent
+      --   | p <- M.elems plans0]
   tsCommonStaticBox .= commonStaticBox
   tsMPIPlanMap .= newPlans
 

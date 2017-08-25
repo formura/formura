@@ -1,7 +1,5 @@
 module Formura.Annotation.Boundary where
 
-import Data.Monoid
-
 import Formura.Vec
 
 newtype Boundary = Boundary (Vec Int, Vec Int)

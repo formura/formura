@@ -21,7 +21,6 @@ import Data.Foldable (toList)
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as S
-import qualified Data.Yaml as Y
 import System.IO.Unsafe
 import Text.Trifecta hiding (ident)
 import Text.Trifecta.Delta
@@ -72,7 +71,7 @@ keyword k = "keyword " ++ k ?> do
     raiseErr $ failed $
     "Please report the compiler developer: \"" ++ k ++ "\" is not in a keyword list!"
 
-  let moreLikeThis = head $ filter ($ (last k)) [isIdentifierAlphabet1, isIdentifierSymbol]
+  let moreLikeThis = head $ filter ($ last k) [isIdentifierAlphabet1, isIdentifierSymbol]
   token $ try $ string k <* notFollowedBy (satisfy moreLikeThis)
 
 -- | The set of reserved keywords. The string is not parsed as a identifier if it's in the keyword list.
@@ -187,12 +186,12 @@ nPlusK = "n+k pattern" ?>  do
     s <- symbolic '+' <|> symbolic '-'
     n <- constRationalExpr
     if s == '+' then return n else return (negate n)
-  lookAhead $ (symbolic ',' <|> symbolic ']')
-  return $ NPlusK (maybe "" id mx) (maybe 0 id mn)
+  lookAhead (symbolic ',' <|> symbolic ']')
+  return $ NPlusK (fromMaybe "" mx) (maybe 0 id mn)
 
 
 imm :: (ImmF ∈ fs) => P (Lang fs)
-imm = "rational literal" ?> parseIn $ do
+imm = "rational literal" ?> parseIn $
   Imm <$> constRational
 
 exprOf :: (OperatorF ∈ fs, ApplyF  ∈ fs) => P (Lang fs) -> P (Lang fs)
@@ -252,7 +251,7 @@ fexpr = "function application chain" ?> do
       case mx' of
         Just x -> findArgument $ Grid x f
         Nothing ->do
-          mx <- optional $ aexpr
+          mx <- optional aexpr
           case mx of
             Just x -> findArgument $ Apply f x
             Nothing ->  return f
@@ -401,9 +400,9 @@ lExpr = "l-expr" ?> lFexpr
 modTypeExpr :: P ModifiedTypeExpr
 modTypeExpr = do
   tm1 <- many typeModifier
-  t <- optional typeFexpr
+  typ <- optional typeFexpr
   tm2 <- many typeModifier
-  return $ case t of
+  return $ case typ of
    Nothing -> ModifiedTypeExpr (tm1 ++ tm2) TopType
    Just t -> ModifiedTypeExpr (tm1 ++ tm2) t
 

@@ -1,4 +1,4 @@
-{-# LANGUAGE ConstraintKinds, LambdaCase, MultiWayIf, TemplateHaskell, TupleSections #-}
+{-# LANGUAGE ConstraintKinds, LambdaCase, MultiWayIf #-}
 
 module Formura.Utilities where
 
@@ -8,13 +8,11 @@ import           Control.Monad
 import qualified Data.ByteString as BS
 import           Data.Foldable
 import qualified Data.HashMap.Strict as HM
-import           Data.List (isPrefixOf, sort, intercalate)
+import           Data.List (isPrefixOf)
 import qualified Data.Yaml as Y
 import qualified Data.Yaml.Pretty as Y
 import           System.Directory
 import           System.Exit
-import           System.FilePath ((</>))
-import           System.FilePath.Lens
 import           System.IO
 import           System.IO.Temp
 import           System.Process
@@ -34,7 +32,7 @@ instance Applicative (Supply s) where
                                 (l'',v) = unSupply av l'
                             in (l'',f v))
 
-runSupply :: (Supply s v) -> [s] -> v
+runSupply :: Supply s v -> [s] -> v
 runSupply av l = snd $ unSupply av l
 
 supply :: Supply s s
@@ -93,7 +91,7 @@ writeYaml :: Y.ToJSON a => FilePath -> a -> IO ()
 writeYaml fn obj = BS.writeFile fn $ Y.encodePretty (Y.setConfCompare compare Y.defConfig) obj
 
 readYaml :: Y.FromJSON a => FilePath -> IO (Maybe a)
-readYaml fn = do
+readYaml fn =
   Y.decodeFileEither fn >>= \case
     Left msg -> do
       hPutStrLn stderr $ "When reading " ++ fn ++ "\n" ++ Y.prettyPrintParseException msg
@@ -101,7 +99,7 @@ readYaml fn = do
     Right x -> return $ Just x
 
 readYamlDef :: (Y.ToJSON a, Y.FromJSON a) => a -> FilePath -> IO (Maybe a)
-readYamlDef def fn = do
+readYamlDef def fn =
   Y.decodeFileEither fn >>= \case
     Left msg -> do
       hPutStrLn stderr $ "When reading " ++ fn ++ "\n" ++ Y.prettyPrintParseException msg
@@ -109,7 +107,7 @@ readYamlDef def fn = do
     Right v -> do
       let v2 :: Y.Value
           v2 = unionValue v (Y.toJSON def)
-      case (Y.decodeEither' $ Y.encode v2) of
+      case Y.decodeEither' $ Y.encode v2 of
         Left msg -> do
           hPutStrLn stderr $ "When merging " ++ fn ++ "\n" ++ Y.prettyPrintParseException msg
           return Nothing
@@ -147,7 +145,7 @@ interactCmd cmdstr input = do
     forkIO $ C.evaluate (length output) >> putMVar outMVar ()
 
     -- now write and flush any input
-    when (not (null input)) $ do hPutStr inh input; hFlush inh
+    unless (null input) $ do hPutStr inh input; hFlush inh
     hClose inh -- done with stdin
 
     -- wait on the output

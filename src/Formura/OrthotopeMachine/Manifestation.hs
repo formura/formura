@@ -13,7 +13,7 @@ A module for manifestation of the Orthotope Machine: that is, an operation that 
 module Formura.OrthotopeMachine.Manifestation where
 
 import           Control.Applicative
-import           Control.Lens
+import           Control.Lens hiding (op)
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Maybe
@@ -85,7 +85,7 @@ mapNodeID c i = do
 toMicroType :: OMNodeType -> TranM MicroNodeType
 toMicroType (GridType _ x) = toMicroType x
 toMicroType (ElemType x) = return $ ElemType x
-toMicroType x = raiseErr $ failed $ "Top type encountered while manifestation"
+toMicroType _ = raiseErr $ failed $ "Top type encountered while manifestation"
 
 type WithNBUSpine = ?nbuSpine :: Bool
 
@@ -104,7 +104,6 @@ insertMM c i inst = do
 -- | generate code that returns the RHS of current (cursor,nid)
 rhsCodeAt :: WithNBUSpine => Vec Int -> OMNodeID -> TranM MMNodeID
 rhsCodeAt cursor nid = do
-  nd <- lookupNode nid
   isM <- use isManifestNode
   case isM nid of
      True  -> do

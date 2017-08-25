@@ -43,14 +43,14 @@ mfold2 k (In meta x) = do
   r1 <- traverse (mfold2 k) x
   compilerFocus %= (meta <|>)
   (g2, h2) <- k r1
-  return $ (propagateMetadata meta g2, propagateMetadata meta h2)
+  return (propagateMetadata meta g2, propagateMetadata meta h2)
 
 
 class Evalable a where
   eval :: a -> IM TypedValue
 
 instance Evalable (ImmF x) where
-  eval (ImmF r) = return $ (ElemValue $ fromRational r, ElemType "double")
+  eval (ImmF r) = return (ElemValue $ fromRational r, ElemType "double")
 
 instance Evalable (IdentF x) where
   eval (IdentF nam) = do
@@ -70,13 +70,13 @@ instance Evalable (OperatorF TypedValue) where
   eval _ = raiseErr $ failed "unimplemented operator in eval"
 
 evalUniop :: (forall a. Num a => a -> a) -> TypedValue -> IM TypedValue
-evalUniop f (ElemValue r, t) = return $ (ElemValue (f r), t)
+evalUniop f (ElemValue r, t) = return (ElemValue (f r), t)
 
 evalBinop :: (forall a. Fractional a => a -> a -> a) -> TypedValue -> TypedValue -> IM TypedValue
-evalBinop f (ElemValue x, tx ) (ElemValue y, ty) = return $ (ElemValue (f x y), tx)
+evalBinop f (ElemValue x, tx ) (ElemValue y, _) = return (ElemValue (f x y), tx)
 
 instance Evalable (TupleF TypedValue) where
-  eval (Tuple xts) = return $ (Tuple $ map fst xts, Tuple $ map snd xts)
+  eval (Tuple xts) = return (Tuple $ map fst xts, Tuple $ map snd xts)
 
 instance Evalable (GridF x) where
   eval _ = raiseErr $ failed "eval of grid unimplemented."

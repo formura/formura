@@ -84,7 +84,7 @@ type MMInstF = Sum '[DataflowInstF, LoadCursorF, OperatorF, ImmF]
 type MMInstruction = M.Map MMNodeID (Node MicroInstruction MicroNodeType)
 type MicroInstruction = MMInstF MMNodeID
 
-data MMLocation = MMLocation { _mmlOMNodeID :: OMNodeID,  _mmlCursor :: (Vec Int)}
+data MMLocation = MMLocation { _mmlOMNodeID :: OMNodeID,  _mmlCursor :: Vec Int}
                   deriving(Eq, Ord, Show)
 
 
@@ -122,9 +122,9 @@ semiLatticeOfOMNodeType a b = case go a b of
     go :: OMNodeType -> OMNodeType -> OMNodeType
     go a b | a == b = a
     go (ElemType ea) (ElemType eb) = subFix (ElemType ea /\ ElemType eb :: ElementalType)
-    go a@(ElemType _) b@(GridType v c) = let d = a /\ c in
+    go a@(ElemType _) (GridType v c) = let d = a /\ c in
            if d==TopType then TopType else GridType v d
-    go (GridType v1 c1) (GridType v2 c2) = (if v1 == v2 then GridType v1 (c1 /\ c2) else TopType)
+    go (GridType v1 c1) (GridType v2 c2) = if v1 == v2 then GridType v1 (c1 /\ c2) else TopType
     go _ _          = TopType
 
 mapElemType :: (IdentName -> IdentName) -> OMNodeType -> OMNodeType

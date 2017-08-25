@@ -17,7 +17,6 @@
 module Formura.MPICxx.Cut where
 
 import           Algebra.Lattice.Levitated
-import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.IO.Class
@@ -43,7 +42,6 @@ import           Formura.OrthotopeMachine.Graph
 import           Formura.NumericalConfig
 import           Formura.Compiler
 import qualified Formura.MPICxx.Language as C
-import System.IO.Unsafe
 
 
 newtype MPIRank = MPIRank (Vec Int) deriving (Eq, Ord, Show, Read, Num, Data)
@@ -199,7 +197,7 @@ initialWalls = do
       mkWall x a n = let ret = boundOfAxis x a n in Orthotope (fmap fst ret) (fmap snd ret)
 
 
-  forM axes $ \ x -> do
+  forM axes $ \ x ->
     case M.lookup x iwparam of
      Nothing -> raiseErr $ failed $ "cannot find initial_wall numerical configuration for axis: " ++ x
      Just [] -> raiseErr $ failed $ "at least 1 element is needed for initial_wall numerical configuration for axis: " ++ x
@@ -230,7 +228,7 @@ cut = do
 
   walls0 <- initialWalls
   -- liftIO $ print (walls0 :: Walls)
-  let wvs = fmap (fmap evalPartition) walls0
+  -- let wvs = fmap (fmap evalPartition) walls0
   -- liftIO $ print (wvs :: Vec [Int])
 
   stepGraph <- view omStepGraph
@@ -241,7 +239,7 @@ cut = do
       wallMap = M.mapWithKey go stepGraph
 
       go :: OMNodeID -> MMNode -> Walls
-      go i mmNode = let
+      go _ mmNode = let
           mmInst :: MMInstruction
           mmInst = mmNode ^. nodeInst
           --microInsts :: [MMInstF MMNodeID]
@@ -275,7 +273,7 @@ cut = do
       staticWallConsensus = minimum staticWalls
 
       systemOffset0 :: Vec Int
-      systemOffset0 = fmap head $ fmap (fmap evalPartition) staticWallConsensus
+      systemOffset0 = fmap (head . fmap evalPartition) staticWallConsensus
 
   let wallEvolution :: M.Map OMNodeID (Vec [Int])
       wallEvolution = fmap (fmap (fmap evalPartition)) wallMap2
@@ -320,7 +318,7 @@ cut = do
         Vec $
         replicate dim [-1,0,1]
       mpiRankOrigin :: MPIRank
-      mpiRankOrigin = MPIRank $ zeroVec
+      mpiRankOrigin = MPIRank zeroVec
 
       mpiBox0 :: Box
       mpiBox0 = Orthotope zeroVec intraShape0
@@ -407,7 +405,7 @@ cut = do
 
 
       go :: (IRank, OMNodeID) -> M.Map Resource Box -> [Ridge]
-      go (ir, nid) rbmap =
+      go (ir, _) rbmap =
         [ mkRidge ir crsc
         | (rsc,b0) <- M.toList rbmap
         , crsc <- locateSources ir (rsc,b0)
@@ -421,10 +419,10 @@ cut = do
       allRidges = M.unionsWith (|||) $ map (uncurry M.singleton) $ concat $  M.elems ridgeAndBoxRequest
 
   let ridgeProvide :: M.Map (ResourceT () IRank) [RidgeID]
-      ridgeProvide = foldr (M.unionWith (++)) M.empty $ map mkProvide $ M.keys $ allRidges
+      ridgeProvide = foldr (M.unionWith (++)) M.empty $ map mkProvide $ M.keys allRidges
 
       mkProvide :: RidgeID -> M.Map (ResourceT () IRank) [RidgeID]
-      mkProvide ridge0@(RidgeID dmpi drsc) = case drsc of
+      mkProvide ridge0@(RidgeID _ drsc) = case drsc of
         ResourceStatic sn () -> M.singleton (ResourceStatic sn ()) [ridge0]
         ResourceOMNode nid (iSrc,_) -> M.singleton (ResourceOMNode nid iSrc) [ridge0]
 
@@ -435,7 +433,7 @@ cut = do
         , doesRidgeNeedMPI r
         , let Just irDest = M.lookup r ridgeFirstNeededAt
         , let irSrc = case r ^. ridgeDelta of
-                ResourceStatic _ _     -> head $ iRanks0
+                ResourceStatic _ _     -> head iRanks0
                 ResourceOMNode _ (x,_) -> x]
 
       allFacets :: M.Map FacetID [RidgeID]
@@ -444,13 +442,13 @@ cut = do
 
   let insert :: DistributedInst -> PlanM ()
       insert inst = do
-        psAlreadyIssuedInst %= (S.insert inst)
+        psAlreadyIssuedInst %= S.insert inst
         psDistributedProgramQ %= (Q.|> inst)
 
       insertOnce :: DistributedInst -> PlanM ()
       insertOnce inst = do
         aii <- use psAlreadyIssuedInst
-        when (not $ S.member inst aii) $ insert inst
+        unless (S.member inst aii) $ insert inst
 
   stateSignature0 <- view omStateSignature
 
@@ -584,7 +582,7 @@ cut = do
       | ir <- iRanks0
       , nid <- M.keys stepGraph
       ]
-    , _planDistributedProgram = optimizeCommunicationsOrder $ dProg1
+    , _planDistributedProgram = optimizeCommunicationsOrder dProg1
     , _planSystemOffset = systemOffset0
     , _planResourceSharing = resourceSharing0
     , _planSharedResourceExtent = largestBox
@@ -605,7 +603,7 @@ optimizeCommunicationsOrder dprog = dprog1
     groupedProg :: [[DistributedInst]]
     groupedProg = groupBy bothComm dprog
 
-    dprog1 = concat $ map (sortBy (compare `on` maybeWaitOrder)) groupedProg
+    dprog1 = concatMap (sortBy (compare `on` maybeWaitOrder)) groupedProg
 
 
     bothComm (CommunicationSendRecv _) (CommunicationSendRecv _) = True
