@@ -18,19 +18,17 @@ import Control.Lens
 import Data.Data
 import Data.Foldable (toList)
 import Data.Generics.Schemes(everywhere)
+import Data.Maybe (fromMaybe)
 
 import Formura.Vec
 import Formura.Syntax
 
 
 mapEverywhere :: (Data a, Data b) => (b->b) -> a -> a
-mapEverywhere f x = everywhere (caster f) x
+mapEverywhere f = everywhere (caster f)
   where
     caster :: (Typeable a) => (a -> a) -> (forall b. Typeable b => b -> b)
-    caster f x =
-      case (cast =<<) $ fmap f $ cast x of
-       Just y  -> y
-       Nothing -> x
+    caster f x = fromMaybe x ((cast =<<) $ f <$> cast x)
 
 
 desugar :: Program -> IO Program
@@ -40,7 +38,7 @@ desugar prog = do
             [error "no dimension declaration found."]
   let
       modifyTypeExpr :: TypeExpr -> TypeExpr
-      modifyTypeExpr (GridType xs x) = GridType (Vec $ take dim $ (toList xs) ++ repeat 0) x
+      modifyTypeExpr (GridType xs x) = GridType (Vec $ take dim $ toList xs ++ repeat 0) x
       modifyTypeExpr x = x
 
       modifyLExpr :: LExpr -> LExpr

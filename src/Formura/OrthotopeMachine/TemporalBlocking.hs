@@ -4,9 +4,7 @@ module Formura.OrthotopeMachine.TemporalBlocking where
 import           Control.Lens
 import qualified Data.Map as M
 import           Data.Maybe
-import           System.IO.Unsafe
 
-import Formura.Language.Combinator
 import Formura.CommandLineOption
 import Formura.Syntax
 import Formura.OrthotopeMachine.Graph
@@ -128,7 +126,7 @@ temporalBlocking tbFoldingNumber mmprog0 = mmprog0 & omStepGraph .~ stepGraphN
 
     storeToReturn :: MicroNode -> MicroNode
     storeToReturn nd0 = case nd0 ^. nodeInst of
-      (Store ident x) ->
+      (Store _ x) ->
         nd0
         & nodeInst .~ Uniop "+" x
       _ -> nd0

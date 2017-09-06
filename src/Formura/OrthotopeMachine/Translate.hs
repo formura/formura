@@ -1,12 +1,9 @@
-{-# LANGUAGE DataKinds, DeriveFunctor, DeriveFoldable,
-DeriveTraversable, FlexibleContexts, FlexibleInstances, GADTs, PackageImports, PatternSynonyms,
-ScopedTypeVariables,
-TemplateHaskell, TypeOperators, ViewPatterns #-}
+{-# LANGUAGE DataKinds, DeriveFunctor, DeriveFoldable, DeriveTraversable, FlexibleContexts, FlexibleInstances, GADTs, PackageImports, PatternSynonyms, ScopedTypeVariables, TemplateHaskell, TypeOperators, ViewPatterns #-}
 module Formura.OrthotopeMachine.Translate where
 
 import           Algebra.Lattice
 import           Control.Applicative
-import           Control.Lens hiding (op)
+import           Control.Lens hiding (at, op)
 import           Control.Monad
 import "mtl"     Control.Monad.Reader hiding (fix)
 import           Data.Foldable
@@ -68,11 +65,11 @@ type LexGenM = CompilerMonad LexBinding () CodegenState
 
 setupGlobalEnvironment :: Program -> GenM ()
 setupGlobalEnvironment prog = do
-  dim <- case concat $ map findDimension spDecls of
+  dim <- case concatMap findDimension spDecls of
     [n] -> return n
     [] -> raiseErr $ failed "no dimension declaration found."
     _  -> raiseErr $ failed "multiple dimension declaration found."
-  axs <- case concat $ map findAxesDeclaration spDecls of
+  axs <- case concatMap findAxesDeclaration spDecls of
     [xs] | length xs == dim -> return xs
     [_] -> raiseErr $ failed "number of declared axes does not match the declared dimension."
     [] -> raiseErr $ failed "no axes declaration found."
@@ -129,7 +126,7 @@ castVal :: TypeExpr -> ValueExpr -> GenM ValueExpr
 castVal t1 vx = let t0 = typeOfVal vx in case (t1, t0, vx) of
   _ | t1 == t0 -> return vx
   (ElemType _, ElemType _, _) -> return vx
-  (GridType vec (ElemType te), ElemType _, n :. _) -> return (n :. (GridType vec (ElemType te)))
+  (GridType vec (ElemType te), ElemType _, n :. _) -> return (n :. GridType vec (ElemType te))
   (GridType vec0 _, GridType vec1 _, _) | vec0 == vec1 ->  return vx
   _ -> raiseErr $ failed $ "cannot convert type " ++ show t0 ++ " to " ++ show t1
 
@@ -140,7 +137,7 @@ instance Generatable ImmF where
 
 spoonTExpr :: (TupleF ∈ fs) => TExpr (Lang fs) -> GenM (Lang fs)
 spoonTExpr x = case x ^? tExpr of
-  Nothing -> raiseErr $ failed $ "Tuple length mismatch"
+  Nothing -> raiseErr $ failed "Tuple length mismatch"
   Just y -> return y
 
 instance Generatable OperatorF where
@@ -163,7 +160,7 @@ goNaryop :: IdentName -> [ValueExpr] -> GenM ValueExpr
 goNaryop op xs = do
   mvst <- foldrM foldVT Nothing xs
   case mvst of
-    Nothing -> raiseErr $ failed $ "unexpected N-ary operator with 0 argument"
+    Nothing -> raiseErr $ failed "unexpected N-ary operator with 0 argument"
     Just (vs,t) -> insert (Naryop op vs) t
 
   where
@@ -173,7 +170,7 @@ goNaryop op xs = do
       TopType -> raiseErr $ failed $ unwords
              ["there is no common type that can accomodate both hand side:", op, show at , show bt]
       ct -> return $ Just (av:bvs, ct)
-    foldVT _ _ = raiseErr $ failed $ "unexpected path in N-ary operator"
+    foldVT _ _ = raiseErr $ failed "unexpected path in N-ary operator"
 
 goUniop :: IdentName -> ValueExpr -> GenM ValueExpr
 goUniop op (av :. at) = insert (Uniop op av) at
@@ -182,11 +179,11 @@ goUniop op (f@(FunValue _ _)) =
 goUniop op (Tuple xs) = do
   vs <- traverse (goUniop op) xs
   return $ Tuple vs
-goUniop _ _  = raiseErr $ failed $ "unexpected path in unary operator"
+goUniop _ _  = raiseErr $ failed "unexpected path in unary operator"
 
 goBinop :: IdentName -> ValueExpr -> ValueExpr -> GenM ValueExpr
 goBinop (".") a b = return $ FunValue (Ident "x") (Apply (subFix a) (Apply (subFix b) (Ident "x")))
-goBinop op ax@(av :. at) bx@(bv :. bt) = case at /\ bt of
+goBinop op ax@(_ :. at) bx@(_ :. bt) = case at /\ bt of
   TopType -> raiseErr $ failed $ unwords
              ["there is no common type that can accomodate both hand side:", show at, op , show bt]
   ct -> do
@@ -206,7 +203,7 @@ goBinop op (x@(_ :. _)) (g@(FunValue _ _)) =
 goBinop op (Tuple xs) (Tuple ys) | length xs == length ys = do
                                      zs <- zipWithM (goBinop op) xs ys
                                      return $ Tuple zs
-goBinop op (Tuple xs) (Tuple ys) = raiseErr $ failed "tuple length mismatch."
+goBinop _ (Tuple _) (Tuple _) = raiseErr $ failed "tuple length mismatch."
 goBinop op (x@(_ :. _)) (Tuple ys) = Tuple <$> sequence [goBinop op x y | y <- ys]
 goBinop op (Tuple xs) (y@(_ :. _)) = Tuple <$> sequence [goBinop op x y | x <- xs]
 goBinop o a b  = raiseErr $ failed $ unlines ["unexpected path in binary operator: ", "OP:",  show o,"LHS:",show a,"RHS:",show b]
@@ -219,11 +216,11 @@ isBoolishType _ = False
 goTriop :: IdentName -> ValueExpr -> ValueExpr -> ValueExpr -> GenM ValueExpr
 goTriop op (av :. at) (bv :. bt) (cv :. ct)
   | op == "ite" = do
-      when (not $ isBoolishType at) $
+      unless (isBoolishType at) $
         raiseErr $ failed "the first argument of if-expr must be of type bool"
       let bct =  bt /\ ct
       case at /\ bct of
-        TopType -> raiseErr $ failed $ unwords $
+        TopType -> raiseErr $ failed $ unwords
                    ["Type mismatch in if-then-else expr:", show at, show bt, show ct]
         _ -> insert (Triop op av bv cv) bct
 goTriop op _ _ _ = raiseErr $ failed $ "unexpected path in trinary operator" ++ show op
@@ -232,7 +229,7 @@ instance Generatable IdentF where
   gen (Ident n) = do
     b <- view binding
     case M.lookup n b of
-      Nothing -> do
+      Nothing ->
         raiseErr $ failed $ "undefined variable: " ++ n ++ "\n Bindings:\n" ++ show b
       Just x  -> return $ subFix x
 
@@ -292,7 +289,7 @@ goApply (Tuple xs) (Imm r) = do
   when (n < 0 || n >= l) $ raiseErr $ failed "tuple access out of bounds"
   return $ xs!!n
 
-goApply x@(Tuple xs) arg0 = do
+goApply x@(Tuple _) arg0 = do
   i <- evalToImm arg0
   case i of
     Just r -> goApply x (Imm r)
@@ -358,11 +355,11 @@ indexNamesOfLhs  _            = PureVec Nothing
 
 
 tupleContents :: (TupleF ∈ fs) => Lang fs -> [Lang fs]
-tupleContents (Tuple xs) = concat $ map tupleContents xs
+tupleContents (Tuple xs) = concatMap tupleContents xs
 tupleContents x          = [x]
 
 matchToLhs :: (TupleF ∈ fs) => LExpr -> Lang fs -> GenM [(IdentName, Lang fs)]
-matchToLhs l x = matchToIdents (namesOfLhs l) x
+matchToLhs l = matchToIdents (namesOfLhs l)
 
 matchToIdents :: (TupleF ∈ fs) => TupleOfIdents -> Lang fs -> GenM [(IdentName, Lang fs)]
 matchToIdents = go
@@ -407,7 +404,6 @@ matchTupleRtoL = go
 
 withBindings :: BindingF (GenM ValueExpr) -> GenM a -> GenM a
 withBindings b1 genX = do
-  b0 <- view binding
   let
       typeDecls0 :: [(LExpr, TypeExpr)]
       typeDecls0 = typeDecls b1
@@ -425,7 +421,7 @@ withBindings b1 genX = do
   let typeModDict :: M.Map IdentName [TypeModifier]
       typeModDict = M.unionsWith (++) $
                     map (\(ident, tm) -> M.singleton ident [tm]) $
-                    (typeModifiers b1) >>= evalTypeModDecl
+                    typeModifiers b1 >>= evalTypeModDecl
 
   -- select all external function declarations
   let extFuns :: [IdentName]
@@ -451,22 +447,22 @@ withBindings b1 genX = do
         v <- insert (LoadIndex ax) (ElemType "Rational")
         return (x, v)
 
-      v0 <- local (binding %~ M.union (M.fromList indexBindings)) $ genV
+      v0 <- local (binding %~ M.union (M.fromList indexBindings)) genV
       lvs <- matchValueExprToLhs l0 v0
       nvs <- forM lvs $ \ (name0, v1) -> do
-        v <- case M.lookup (name0) typeDict of
+        v <- case M.lookup name0 typeDict of
           Nothing -> return v1
           Just t  -> castVal t v1
 
         let
           annV (n :. _) = do
-             theGraph . ix n . A.annotation %= A.weakSet (SourceName $ name0)
+             theGraph . ix n . A.annotation %= A.weakSet (SourceName name0)
              let isManifest = do
                    ms <- M.lookup name0 typeModDict
                    return $ TMManifest `elem` ms
              when (isManifest == Just True) $ do
                theGraph . ix n . A.annotation %= A.set Manifest
-               theGraph . ix n . A.annotation %= A.set (SourceName $ name0)
+               theGraph . ix n . A.annotation %= A.set (SourceName name0)
 
           annV (Tuple xs) = mapM_ annV xs
           annV _ = return ()
@@ -498,7 +494,7 @@ instance (Generatable f, Generatable (Sum fs)) => Generatable (Sum (f ': fs)) wh
   gen =  gen +:: gen
 
 genRhs :: RXExpr -> GenM ValueExpr
-genRhs r = compilerFoldout gen r
+genRhs = compilerFoldout gen
 
 toNodeType :: TypeExpr -> GenM OMNodeType
 toNodeType (ElemType x) = return $ ElemType x
@@ -517,7 +513,6 @@ genGlobalFunction globalBinding inputType outputPattern (Lambda l r) =  bindThem
 
     t1d <- toNodeType t1
     v1 <- insert (Load name1) t1d
-    let (n :. _ ) = v1
 
     return (name1, v1)
 
@@ -525,7 +520,7 @@ genGlobalFunction globalBinding inputType outputPattern (Lambda l r) =  bindThem
 
   rvElems <- matchToLhs outputPattern returnValueExpr
 
-  forM_ rvElems $ \ (name1, rv1) -> do
+  forM_ rvElems $ \ (name1, rv1) ->
     case rv1 of
       (n99 :. _ ) -> do
         (n100 :. _) <- insert (Store name1 n99) unitType
@@ -546,7 +541,7 @@ lookupToplevelIdents fprog name0 =  case lup stmts of
   [x] -> return x
   _  -> raiseErr $ failed $ "Multiple declaration of identifier `" ++ name0 ++ "` found."
   where
-    (Program decls (BindingF stmts) _) = fprog
+    (Program _ (BindingF stmts) _) = fprog
 
     lup :: [StatementF RExpr] -> [RExpr]
     lup [] = []
@@ -569,7 +564,7 @@ genOMProgram fprog = do
     stepFunDef <- lookupToplevelIdents fprog "step"
     setupGlobalEnvironment fprog
     stepType <- genGlobalFunction gbinds initType lhsOfStep stepFunDef
-    when (initType /= stepType) $ do
+    when (initType /= stepType) $
       raiseErr $ failed $ "the return type of step : " ++ show stepType ++ "\n" ++
         "must match the return type of init : " ++ show initType
 

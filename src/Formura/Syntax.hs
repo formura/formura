@@ -9,9 +9,7 @@ Stability   : experimental
 Components for syntatic elements of formura.
 -}
 
-{-# LANGUAGE DataKinds, DeriveDataTypeable, DeriveFunctor, DeriveFoldable, DeriveGeneric,
-DeriveTraversable, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses,
-PatternSynonyms, StandaloneDeriving, TemplateHaskell, TypeFamilies, ViewPatterns #-}
+{-# LANGUAGE DataKinds, DeriveDataTypeable, DeriveFunctor, DeriveFoldable, DeriveGeneric, DeriveTraversable, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, PatternSynonyms, StandaloneDeriving, TemplateHaskell, TypeFamilies, ViewPatterns #-}
 
 module Formura.Syntax where
 
@@ -20,7 +18,6 @@ import Control.Lens hiding (op)
 import Data.Data
 import Data.List (intercalate)
 import qualified Data.Set as S
-import Data.Typeable
 import GHC.Generics
 import qualified Test.QuickCheck as Q
 
@@ -309,7 +306,7 @@ semiLatticeOfTypeExpr a b = case go a b of
   where
     go :: TypeExpr -> TypeExpr -> TypeExpr
     go a b | a == b = a
-    go a@(ElemType _) b@(GridType v c) = let d = a/\c in if d==TopType then TopType else GridType v d
+    go a@(ElemType _) (GridType v c) = let d = a/\c in if d==TopType then TopType else GridType v d
     go (GridType v1 c1) (GridType v2 c2) = if v1 == v2 then GridType v1 (c1 /\ c2) else TopType
     go _ _          = TopType
 

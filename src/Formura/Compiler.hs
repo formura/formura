@@ -7,7 +7,6 @@ import           Control.Lens
 import           Control.Monad.Trans.Either
 import           Control.Monad.Morph
 import "mtl"     Control.Monad.RWS
-import qualified Data.IntMap as G
 import qualified Data.Set as S
 import           System.IO
 import           System.Exit
@@ -43,20 +42,20 @@ compileErrMsg errMsg = do
           | stg == "" = errMsg
           | otherwise = errMsg & P.footnotes %~ (++ [Ppr.text ("when " ++ stg)])
     case foc of
-      Nothing -> return $ P.explain P.emptyRendering $ errMsg2
+      Nothing -> return $ P.explain P.emptyRendering errMsg2
       Just (Metadata r b e) -> return $
-        P.explain (P.addSpan b e $ r) $ errMsg2
+        P.explain (P.addSpan b e r) errMsg2
 
 
 -- | Throw an error, possibly with user-friendly diagnostics of the current compiler state.
 instance (HasCompilerSyntacticState s, Monoid w) => P.Errable (CompilerMonad r w s) where
   raiseErr errMsg = do
     msg2 <- compileErrMsg errMsg
-    CompilerMonad $ left $ msg2
+    CompilerMonad $ left msg2
 
 -- | Run the compiler and get the result.
 evalCompiler :: CompilerMonad r w s a -> r -> s -> IO (Either CompilerError a)
-evalCompiler m r s = fmap fst $ evalRWST (runEitherT $ runCompilerMonad m) r s
+evalCompiler m r s = fst <$> evalRWST (runEitherT $ runCompilerMonad m) r s
 
 -- | Run the compiler and get the state and written results.
 --   Note that you get some partial results even when the compilation aborts.
@@ -102,7 +101,7 @@ compilerMFoldout k (In meta x) = do
   r1 <- traverse (compilerMFoldout k) x
   compilerFocus %= (meta <|>)
   r2 <- k r1
-  return $ r2
+  return r2
 
 -- | The compiler-monad-specific pure foldout, that takes track of the syntax tree traversed.
 compilerFoldout :: (Monoid w, Traversable f, HasCompilerSyntacticState s) =>

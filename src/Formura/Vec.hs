@@ -11,10 +11,8 @@ ZipList treated as mathematical vectors, to deal with multidimensionality in ste
 
 module Formura.Vec where
 
-import           Control.Applicative
 import           Control.Lens
 import qualified Data.Aeson as J
-import           Data.Char (toLower)
 import           Data.Data
 import           Data.List (intercalate)
 import           Data.Monoid
