@@ -26,3 +26,5 @@ install:
 
 script:
 - stack --no-terminal build
+- stack exec -- formura test-src/sample.fmr
+- ./diff-test.sh
