@@ -42,6 +42,13 @@ process fn = do
 codegen :: WithCommandLineOption => Program -> IO ()
 codegen sugarcoated_prog = do
   prog <- desugar sugarcoated_prog
+  when (?commandLineOption ^. verbose) $ do
+    putStrLn "## AST"
+    print sugarcoated_prog
+    putStrLn ""
+    putStrLn "## Desugared AST"
+    print prog
+    putStrLn ""
 
   omProg <- genOMProgram prog
 
@@ -93,5 +100,7 @@ pprMMNode (i,n) = do
       varName = case A.toMaybe (n ^. A.annotation) of
         Just (SourceName n1) -> n1
         _                   -> ""
-      Just (Boundary bdy) = A.toMaybe $ n^.A.annotation
-  putStrLn $ unwords [take 8 $ varName ++ repeat ' ', show (i,n),show bdy]
+      -- Just (Boundary bdy) = A.toMaybe $ n^.A.annotation
+  -- print bdy
+  -- putStrLn $ unwords [take 8 $ varName ++ repeat ' ', show (i,n),show bdy]
+  putStrLn $ unwords [take 8 $ varName ++ repeat ' ', show (i,n)]
