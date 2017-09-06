@@ -1,0 +1,22 @@
+dimension :: 2
+axes :: x, y
+
+double :: Fe = 1/900, Fu = 1/86400, Fv = 6/86400, Du = 0.1*2.3e-9, Dv = 6.1e-11, dt = 200, dx = 0.001
+
+ddx = fun(a) (a[i+1/2,j] - a[i-1/2,j])/dx
+ddy = fun(a) (a[i,j+1/2] - a[i,j-1/2])/dx
+
+del = (ddx, ddy)
+sum = fun(e) e 0 + e 1
+
+begin function (U, V) = init()
+  double [] :: U = 0, V = 0
+end function
+
+begin function (U_next, V_next) = step(U,V)
+  dU_dt = -Fe*U*V*V + Fu*(1-U) + Du*sum fun(i) (del i . del i) U
+  dV_dt =  Fe*U*V*V - Fv*V     + Dv*sum fun(i) (del i . del i) V
+
+  U_next = U + dt*dU_dt
+  V_next = V + dt*dV_dt
+end function

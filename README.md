@@ -1,7 +1,4 @@
-
-formura [![Build Status](https://travis-ci.org/nushio3/formura.svg?branch=master)](https://travis-ci.org/nushio3/formura) [![Download](https://img.shields.io/github/downloads/nushio3/formura/latest/total.svg)](https://github.com/nushio3/formura/releases/download/test/formura)
-=======
-
+# formura [![Build Status](https://travis-ci.org/formura/formura.svg?branch=master)](https://travis-ci.org/formura/formura) [![Download](https://img.shields.io/github/downloads/nushio3/formura/latest/total.svg)](https://github.com/nushio3/formura/releases/download/test/formura)
 
 
 Formura = Formula Translator - Translator + RA (Reserach Assistant)
@@ -15,3 +12,6 @@ In Formura, you can describe stencil computations just as if you would write the
 The syntax of Formura is kept simple, so that you can easily learn and write simple Formura programs, and you can generate more complex Formura programs from your favorite programming languages.
 
 ![really wanted](http://www.projectcartoon.com/cells/cell_13.jpg)
+
+
+Note: The originary repo is <https://github.com/nushio3/formura>.

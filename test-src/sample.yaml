@@ -1,0 +1,8 @@
+initial_walls:
+  x: [50,150]
+  y: [50,150]
+intra_node_shape: [200,200]
+monitor_interval: 4
+mpi_grid_shape: [1,1]
+temporal_blocking_interval: 2
+

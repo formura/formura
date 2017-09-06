@@ -1,33 +1,30 @@
-# c.f. https://github.com/commercialhaskell/stack/wiki/Travis
+# See
+# https://docs.haskellstack.org/en/stable/travis_ci/
+# https://raw.githubusercontent.com/commercialhaskell/stack/master/doc/travis-simple.yml
 sudo: false
 
-before_install:
-  # stack
-  - mkdir -p bin
-  - mkdir -p ~/.local/bin
-  - mkdir -p ~/.local/lib
-  - export PATH=~/.local/bin:$PATH
-  - export LD_LIBRARY_PATH=~/.local/lib:$LD_LIBRARY_PATH
-  - ./scripts/install-z3.sh
-  - travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
-  - export PATH=/opt/ghc/7.10.3/bin:./bin/:$PATH
-  - stack setup
+language: generic
+
+cache:
+  directories:
+  - $HOME/.stack
+
 addons:
   apt:
-    sources:
-    - hvr-ghc
     packages:
-    - ghc-7.10.3
-    - libgmp-dev
-    - openmpi-bin
-    - libopenmpi-dev
+      - libgmp-dev
+
+before_install:
+# Download and unpack the stack executable
+- mkdir -p ~/.local/bin
+- export PATH=$HOME/.local/bin:$PATH
+- travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
+
+install:
+# Build dependencies
+- stack --no-terminal --install-ghc build --only-dependencies
+
 script:
-  - stack --no-terminal --skip-ghc-check build --ghc-options=-ferror-spans
-  - stack install .
-  - stack exec formura -- examples/pearson-3d.fmr
-  - ./cmake-for-x86.sh
-  - make bin/pearson-3d.out
-#   - travis_wait 30 stack exec formura -- examples/3d-localsun.fmr
-#   - travis_wait 30 mpicxx -I fj_dummy -c examples/3d-localsun.*c*
-  - stack test
-  - echo "done test"
+- stack --no-terminal build
+- stack exec -- formura test-src/sample.fmr
+- ./diff-test.sh
