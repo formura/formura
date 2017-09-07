@@ -311,7 +311,8 @@ functionSyntaxSugar = "function definition" ?> do
               [Ppr.text "Please check if you are using one of the following forms:",
                Ppr.text "・  begin function f(x) returns y",
                Ppr.text "・  begin function y = f(x)"]
-              S.empty)
+              S.empty
+              [])
   statementDelimiter
   b <- binding
   keyword "end"

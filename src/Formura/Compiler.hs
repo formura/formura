@@ -80,7 +80,7 @@ withCompiler f = CompilerMonad . (hoist $ withRWST f) . runCompilerMonad
 
 -- | Raise doc as an error
 raiseDoc :: P.Errable m => Ppr.Doc ->  m a
-raiseDoc doc = P.raiseErr $ P.Err (Just doc) [] S.empty
+raiseDoc doc = P.raiseErr $ P.Err (Just doc) [] S.empty []
 
 -- | The monadic algebra, specialized to the compiler monad.
 type CompilerAlgebra r w s f a = f a -> CompilerMonad r w s a

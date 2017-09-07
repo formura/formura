@@ -1,4 +1,5 @@
 {-# LANGUAGE ImplicitParams, TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Formura.OrthotopeMachine.TemporalBlocking where
 
 import           Control.Lens
