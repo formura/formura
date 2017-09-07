@@ -5,6 +5,7 @@ import Control.Lens
 import Control.Monad
 import Data.Maybe
 import Data.Dynamic
+import Data.Typeable
 import Prelude hiding (map)
 import qualified Prelude as P (map)
 

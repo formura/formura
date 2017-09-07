@@ -36,7 +36,7 @@ process :: WithCommandLineOption => FilePath -> IO ()
 process fn = do
   mprog <- P.parseFromFileEx (P.runP $ P.program <* P.eof) fn
   case mprog of
-      P.Failure doc -> Ppr.displayIO stdout $ Ppr.renderPretty 0.8 80 $ doc <> Ppr.linebreak
+      P.Failure err -> Ppr.displayIO stdout $ Ppr.renderPretty 0.8 80 $ P._errDoc err <> Ppr.linebreak
       P.Success prog -> codegen prog
 
 codegen :: WithCommandLineOption => Program -> IO ()
