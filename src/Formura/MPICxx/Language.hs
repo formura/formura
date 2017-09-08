@@ -1,24 +1,36 @@
-{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, ImplicitParams, OverloadedStrings, TemplateHaskell, TypeSynonymInstances #-}
+{-# LANGUAGE DeriveFoldable             #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DeriveTraversable          #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImplicitParams             #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
 
 module Formura.MPICxx.Language where
+
 import           Control.Lens
-import           Data.Foldable(toList)
+import           Data.Foldable (toList)
 import           Data.List (intersperse)
 import           Data.Monoid
 import           Data.String
 import           Data.String.ToString
 import qualified Data.Text as T
-import           Prelude hiding (show, Word, length)
+import           Prelude hiding (Word, length, show)
 import qualified Prelude
 import           System.FilePath.Lens
 
-import           Formura.CommandLineOption
+import Formura.CommandLineOption
 
-data TargetLanguage = MPICxx | MPIFortran deriving(Eq,Ord,Show,Read)
+data TargetLanguage = MPICxx | MPIFortran
+  deriving (Eq, Ord, Show, Read)
+
 
 targetLanguage :: WithCommandLineOption => TargetLanguage
 targetLanguage = case ?commandLineOption ^. outputFilename . extension of
-  ('.':'f':_)     -> MPIFortran
+  ('.':'f':_) -> MPIFortran
   _           -> MPICxx
 
 
@@ -27,13 +39,17 @@ data WordF a = Raw T.Text
              | PotentialSubroutine (SrcF a)
              deriving (Eq, Ord, Show, Read, Functor, Foldable, Traversable)
 
-data TypedHole = Typed { _holeType :: T.Text, _holeExpr :: T.Text}
-             deriving (Eq, Ord, Show, Read)
 
-type Word = WordF (TypedHole)
+data TypedHole = Typed {_holeType :: T.Text, _holeExpr :: T.Text}
+  deriving (Eq, Ord, Show, Read)
+
+
+type Word = WordF TypedHole
+
 
 newtype SrcF a = Src [WordF a]
-               deriving (Eq, Ord, Show, Read, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Show, Read, Functor, Foldable, Traversable)
+
 
 type Src = SrcF TypedHole
 
@@ -73,7 +89,7 @@ instance ToString Word where
   toString x = toString $ toText x
 
 instance ToString Src where
-  toString (Src xs) = concat $ map toString xs
+  toString (Src xs) = concatMap toString xs
 
 class ToText a where
   toText :: a -> T.Text
@@ -82,23 +98,26 @@ instance ToText Word where
   toText (Raw x) = x
   toText (Hole (Typed _ x)) = x
   toText (PotentialSubroutine x) = toText x
+
 instance ToText Src where
   toText (Src xs) = mconcat $ map toText xs
-
-
 
 
 length :: Src -> Int
 length = T.length . toText
 
+
 raw :: T.Text -> Src
 raw t = Src [Raw t]
+
 
 show :: Show a => a -> Src
 show = fromString . Prelude.show
 
+
 parameter :: Show a => T.Text -> a -> Src
 parameter t x = Src [Hole (Typed t (fromString $ Prelude.show x))]
+
 
 typedHole :: T.Text -> T.Text -> Src
 typedHole t x = Src [Hole (Typed t x)]
@@ -107,23 +126,30 @@ typedHole t x = Src [Hole (Typed t x)]
 parens :: Src -> Src
 parens x = "(" <> x <> ")"
 
+
 brackets :: Src -> Src
 brackets x = "[" <> x <> "]"
+
 
 braces :: Src -> Src
 braces x = "{" <> x <> "}"
 
+
 unwords :: [Src] -> Src
 unwords = mconcat . intersperse " "
+
 
 unlines :: [Src] -> Src
 unlines = mconcat . map (<> "\n")
 
+
 intercalate :: Src -> [Src] -> Src
 intercalate x ys = mconcat $ intersperse x ys
 
+
 parensTuple :: Foldable t => t Src -> Src
 parensTuple = parens . intercalate ", " . toList
+
 
 replace :: Src -> Src -> Src -> Src
 replace src dest (Src xs) = Src $ map go xs
@@ -133,9 +159,11 @@ replace src dest (Src xs) = Src $ map go xs
     go x@(Hole _) = x
     go (PotentialSubroutine s) = PotentialSubroutine $ replace src dest s
 
+
 -- | Wrap a C source as a potential subroutine
 potentialSubroutine :: Src -> Src
 potentialSubroutine s = Src [PotentialSubroutine s]
+
 
 template :: Src -> Src
 template (Src xs) = Src $ map go xs

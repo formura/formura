@@ -8,7 +8,19 @@ A virtual machine with multidimensional vector instructions that operates on str
 in http://arxiv.org/abs/1204.4779 .
 -}
 
-{-# LANGUAGE DataKinds, DeriveDataTypeable, DeriveFunctor, DeriveFoldable, DeriveTraversable, FlexibleInstances, FunctionalDependencies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, PatternSynonyms,TemplateHaskell, TypeSynonymInstances, ViewPatterns #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DeriveDataTypeable         #-}
+{-# LANGUAGE DeriveFoldable             #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DeriveTraversable          #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE FunctionalDependencies     #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE PatternSynonyms            #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
+{-# LANGUAGE ViewPatterns               #-}
 
 module Formura.OrthotopeMachine.Graph where
 
@@ -30,10 +42,9 @@ import           Formura.Vec
 data LoadUncursoredF x = LoadF IdentName
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
-data DataflowInstF x
-  = StoreF IdentName x
-  | LoadIndexF Int
-  | LoadExtentF Int
+data DataflowInstF x = StoreF IdentName x
+                     | LoadIndexF Int
+                     | LoadExtentF Int
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
 -- | The functor for language that support shift operations.
@@ -47,30 +58,43 @@ data LoadCursorF x = LoadCursorF (Vec Int) OMNodeID
 
 
 -- | smart patterns
-pattern Load n <- ((^? match) -> Just (LoadF n)) where
-  Load n = match # LoadF n
-pattern Store n x <- ((^? match) -> Just (StoreF n x)) where
-  Store n x = match # StoreF n x
-pattern LoadIndex n <- ((^? match) -> Just (LoadIndexF n)) where
-  LoadIndex n = match # LoadIndexF n
-pattern LoadExtent n <- ((^? match) -> Just (LoadExtentF n)) where
-  LoadExtent n = match # LoadExtentF n
-pattern Shift v x <- ((^? match) -> Just (ShiftF v x)) where
-  Shift v x = match # ShiftF v x
-pattern LoadCursor v x <- ((^? match) -> Just (LoadCursorF v x)) where
-  LoadCursor v x = match # LoadCursorF v x
-pattern LoadCursorStatic v x <- ((^? match) -> Just (LoadCursorStaticF v x)) where
-  LoadCursorStatic v x = match # LoadCursorStaticF v x
+pattern Load n <- ((^? match) -> Just (LoadF n))
+  where Load n = match # LoadF n
+
+pattern Store n x <- ((^? match) -> Just (StoreF n x))
+  where Store n x = match # StoreF n x
+
+pattern LoadIndex n <- ((^? match) -> Just (LoadIndexF n))
+  where LoadIndex n = match # LoadIndexF n
+
+pattern LoadExtent n <- ((^? match) -> Just (LoadExtentF n))
+  where LoadExtent n = match # LoadExtentF n
+
+pattern Shift v x <- ((^? match) -> Just (ShiftF v x))
+  where Shift v x = match # ShiftF v x
+
+pattern LoadCursor v x <- ((^? match) -> Just (LoadCursorF v x))
+  where LoadCursor v x = match # LoadCursorF v x
+
+pattern LoadCursorStatic v x <- ((^? match) -> Just (LoadCursorStaticF v x))
+  where LoadCursorStatic v x = match # LoadCursorStaticF v x
 
 
-newtype OMNodeID = OMNodeID Int deriving (Eq, Ord, Num, Data)
+newtype OMNodeID = OMNodeID Int
+  deriving (Eq, Ord, Num, Data)
+
 instance Show OMNodeID where
   showsPrec n (OMNodeID x) = showsPrec n x
+
 instance Read OMNodeID where
   readPrec = fmap OMNodeID  readPrec
-newtype MMNodeID = MMNodeID Int deriving (Eq, Ord, Num, Data)
+
+newtype MMNodeID = MMNodeID Int
+  deriving (Eq, Ord, Num, Data)
+
 instance Show MMNodeID where
   showsPrec n (MMNodeID x) = showsPrec n x
+
 instance Read MMNodeID where
   readPrec = fmap MMNodeID  readPrec
 
@@ -85,16 +109,16 @@ type MMInstruction = M.Map MMNodeID (Node MicroInstruction MicroNodeType)
 type MicroInstruction = MMInstF MMNodeID
 
 data MMLocation = MMLocation { _mmlOMNodeID :: OMNodeID,  _mmlCursor :: Vec Int}
-                  deriving(Eq, Ord, Show)
+  deriving(Eq, Ord, Show)
 
 
 mmInstTails :: MMInstruction -> [MMInstF MMNodeID]
 mmInstTails mminst = rets
   where
     rets = [_nodeInst nd
-      | nd <- M.elems mminst,
-        let Just (MMLocation omnid2 _) = A.viewMaybe nd,
-        omnid2==omnid ]
+           | nd <- M.elems mminst
+           , let Just (MMLocation omnid2 _) = A.viewMaybe nd
+           , omnid2==omnid ]
 
     Just (MMLocation omnid _) = A.viewMaybe maxNode
 
@@ -122,10 +146,11 @@ semiLatticeOfOMNodeType a b = case go a b of
     go :: OMNodeType -> OMNodeType -> OMNodeType
     go x y | x == y = x
     go (ElemType ea) (ElemType eb) = subFix (ElemType ea /\ ElemType eb :: ElementalType)
-    go x@(ElemType _) (GridType v c) = let d = x /\ c in
-           if d==TopType then TopType else GridType v d
-    go (GridType v1 c1) (GridType v2 c2) = if v1 == v2 then GridType v1 (c1 /\ c2) else TopType
-    go _ _          = TopType
+    go x@(ElemType _) (GridType v c) = let d = x /\ c
+                                        in if d==TopType then TopType else GridType v d
+    go (GridType v1 c1) (GridType v2 c2) = if v1 == v2 then GridType v1 (c1 /\ c2)
+                                                       else TopType
+    go _ _ = TopType
 
 mapElemType :: (IdentName -> IdentName) -> OMNodeType -> OMNodeType
 mapElemType f (ElemType t) = ElemType $ f t
@@ -133,12 +158,17 @@ mapElemType f (GridType v t) = GridType v $ mapElemType f t
 mapElemType _ TopType = TopType
 mapElemType _ _ = error "no match(Formura.OrthotopeMachine.Graph.mapElemType"
 
-data Node instType typeType = Node {_nodeInst :: instType, _nodeType :: typeType, _nodeAnnot :: A.Annotation}
+data Node instType typeType = Node
+  { _nodeInst :: instType
+  , _nodeType :: typeType
+  , _nodeAnnot :: A.Annotation
+  }
 
 instance (Eq i, Eq t) => Eq (Node i t) where
-  (Node a b _) == (Node c d _)   = (a,b) == (c,d)
+  (Node a b _) == (Node c d _) = (a,b) == (c,d)
+
 instance (Ord i, Ord t) => Ord (Node i t) where
-  compare (Node a b _) (Node c d _)   = compare (a,b) (c,d)
+  compare (Node a b _) (Node c d _) = compare (a,b) (c,d)
 
 instance (Show v, Show t) => Show (Node v t) where
   show (Node v t _) = show v ++ " :: " ++ show t
@@ -148,8 +178,10 @@ type MMNode = Node MMInstruction OMNodeType
 type MicroNode = Node MicroInstruction MicroNodeType
 
 makeLenses ''Node
+
 instance A.Annotated (Node v t) where
   annotation = nodeAnnot
+
 -- instance (Data instType) => Data (Node instType typeType) where
 --   gfoldl (*) z x = x{_nodeInst = gfoldl (*) z (_nodeInst x)}
 
@@ -159,15 +191,20 @@ type OMGraph = Graph OMInstruction OMNodeType
 type MMGraph = Graph MMInstruction OMNodeType
 
 data NodeValueF x = NodeValueF OMNodeID OMNodeType
-                 deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
-pattern NodeValue n t <- ((^? match) -> Just (NodeValueF n t)) where NodeValue n t = match # NodeValueF n t
-pattern n :. t <- ((^? match) -> Just (NodeValueF n t)) where n :. t = match # NodeValueF n t
+pattern NodeValue n t <- ((^? match) -> Just (NodeValueF n t))
+  where NodeValue n t = match # NodeValueF n t
+
+pattern n :. t <- ((^? match) -> Just (NodeValueF n t))
+  where n :. t = match # NodeValueF n t
 
 
 data FunValueF x = FunValueF LExpr RXExpr
-                 deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
-pattern FunValue l r <- ((^? match) -> Just (FunValueF l r)) where FunValue l r = match # FunValueF l r
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+pattern FunValue l r <- ((^? match) -> Just (FunValueF l r))
+  where FunValue l r = match # FunValueF l r
 
 
 -- | RXExpr is RExpr extended with NodeValue constructors

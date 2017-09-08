@@ -7,12 +7,28 @@ Stability   : experimental
 Combinators for creating a customized language based on Modular Reifiable Matching.
 -}
 
-{-# LANGUAGE ConstraintKinds, DataKinds, DeriveDataTypeable, DeriveFoldable, DeriveFunctor,
-DeriveTraversable, FlexibleContexts, FlexibleInstances,
-FunctionalDependencies, GADTs, KindSignatures, MultiParamTypeClasses,
-PatternSynonyms, RankNTypes, ScopedTypeVariables, StandaloneDeriving,
-TemplateHaskell, TupleSections, TypeFamilies, TypeOperators,
-UndecidableInstances, ViewPatterns #-}
+{-# LANGUAGE ConstraintKinds        #-}
+{-# LANGUAGE DataKinds              #-}
+{-# LANGUAGE DeriveDataTypeable     #-}
+{-# LANGUAGE DeriveFoldable         #-}
+{-# LANGUAGE DeriveFunctor          #-}
+{-# LANGUAGE DeriveTraversable      #-}
+{-# LANGUAGE FlexibleContexts       #-}
+{-# LANGUAGE FlexibleInstances      #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE GADTs                  #-}
+{-# LANGUAGE KindSignatures         #-}
+{-# LANGUAGE MultiParamTypeClasses  #-}
+{-# LANGUAGE PatternSynonyms        #-}
+{-# LANGUAGE RankNTypes             #-}
+{-# LANGUAGE ScopedTypeVariables    #-}
+{-# LANGUAGE StandaloneDeriving     #-}
+{-# LANGUAGE TemplateHaskell        #-}
+{-# LANGUAGE TupleSections          #-}
+{-# LANGUAGE TypeFamilies           #-}
+{-# LANGUAGE TypeOperators          #-}
+{-# LANGUAGE UndecidableInstances   #-}
+{-# LANGUAGE ViewPatterns           #-}
 
 module Formura.Language.Combinator where
 
@@ -20,8 +36,8 @@ import           Control.Lens
 import           Control.Monad
 import           Data.Data
 import           Data.Traversable
-import qualified Test.QuickCheck     as Q
-import qualified Text.Trifecta       as P hiding (string)
+import qualified Test.QuickCheck as Q
+import qualified Text.Trifecta as P hiding (string)
 import qualified Text.Trifecta.Delta as P
 
 -- * Sum of functors
@@ -32,7 +48,6 @@ data Sum (fs :: [* -> *]) x where
   Here :: Traversable f => f x -> Sum (f ': fs) x
   There :: Sum fs x -> Sum (f ': fs) x
 
-
 instance (Typeable x) => Data (Sum '[] x) where
   gfoldl (*) z Void = z Void
 
@@ -42,14 +57,16 @@ instance (Typeable f, Typeable fs, Typeable x, Data (f x), Data (Sum fs x)) => D
 
 instance Eq (Sum '[] x) where
   _ == _ = True
+
 instance (Eq (f x), Eq (Sum fs x)) => Eq (Sum (f ': fs) x) where
-   (Here a)   == (Here b)  = a == b
-   (Here _ )  == (There _) = False
-   (There _ ) == (Here _)  = False
-   (There a)  == (There b) = a == b
+  (Here a)   == (Here b)  = a == b
+  (Here _ )  == (There _) = False
+  (There _ ) == (Here _)  = False
+  (There a)  == (There b) = a == b
 
 instance Ord (Sum '[] x) where
   compare Void Void = EQ
+
 instance (Ord (f x), Ord (Sum fs x)) => Ord (Sum (f ': fs) x) where
   compare (Here a) (Here b) = compare a b
   compare (Here _ ) (There _) = LT
@@ -99,18 +116,20 @@ instance (Traversable f, Q.Arbitrary (f x), Q.Arbitrary (Sum (g ': fs) x)) => Q.
 
 -- | The prisms for accessing the first functor in the Sum
 _Here :: Traversable f => Prism' (Sum (f ': fs) x) (f x)
-_Here = let a :: Sum (f ': fs) x -> Maybe (f x)
-            a (Here x) = Just x
-            a _        = Nothing
-    in prism' Here a
+_Here = prism' Here a
+  where
+    a :: Sum (f ': fs) x -> Maybe (f x)
+    a (Here x) = Just x
+    a _        = Nothing
+
 
 -- | The prisms for accessing the rest of functors in the Sum
 _There :: Traversable f => Prism' (Sum (f ': fs) x) (Sum fs x)
-_There = let a :: Sum (f ': fs) x -> Maybe (Sum fs x)
-             a (There x) = Just x
-             a _         = Nothing
-    in prism' There a
-
+_There = prism' There a
+  where
+    a :: Sum (f ': fs) x -> Maybe (Sum fs x)
+    a (There x) = Just x
+    a _         = Nothing
 
 
 -- | The constraint that functor f is an element of 'Sum' fs
@@ -122,6 +141,7 @@ type f ∈ fs = Elem f fs
 
 instance {-# OVERLAPPING #-} Traversable f => Elem f (f ': fs) where
   constructor = _Here
+
 instance {-# OVERLAPPABLE #-} (Traversable f, Traversable g, Elem f fs) => Elem f (g ': fs) where
   constructor = _There . constructor
 
@@ -145,8 +165,8 @@ instance {-# OVERLAPPABLE #-} (Traversable f, Elem f gs, Subset fs gs) => Subset
 
                bwd :: Sum gs x -> Maybe (Sum (f ': fs) x)
                bwd ((^? constructor ) -> Just x) = Just (Here x)
-               bwd ((^? subrep) -> Just x) = Just (There x)
-               bwd _                     = Nothing
+               bwd ((^? subrep) -> Just x)       = Just (There x)
+               bwd _                             = Nothing
            in prism' fwd bwd
 
 
@@ -157,6 +177,7 @@ instance {-# OVERLAPPABLE #-} (Traversable f, Elem f gs, Subset fs gs) => Subset
 class Matches f x where
   type Content f x :: *
   match :: Prism' x (f (Content f x))
+
 
 -- | The type of the  'Prism'' that matches any @x@ such that @Matches f x@.
 type MatchPrism (f :: * -> *) = forall x. Matches f x => Prism' x (f (Content f x))
@@ -169,24 +190,32 @@ instance Matches f (f x) where
 -- * Syntax tree
 
 -- | The compiler metadata.
-data Metadata = Metadata {_metadataRendering :: P.Rendering, _metadataBegin :: P.Delta,  _metadataEnd :: P.Delta}
+data Metadata = Metadata
+  { _metadataRendering :: P.Rendering
+  , _metadataBegin     :: P.Delta
+  , _metadataEnd       :: P.Delta
+  }
+
 makeLenses ''Metadata
 
 instance Show Metadata where
   show = const ""
+
 instance P.HasRendering Metadata where
   rendering = metadataRendering
 
 
--- | The fix point of F-algebra, with compiler metadata information. This is the datatype we use to represent any AST.
+-- | The fix point of F-algebra, with compiler metadata information.
+--   This is the datatype we use to represent any AST.
 data Fix f where
   In :: Functor f => {_metadata :: Maybe Metadata, _out :: f (Fix f)} -> Fix f
+
 instance (Typeable f, Data (f (Fix f))) => Data (Fix f) where
   gfoldl (*) z (In m a)  = z (In m) * a
 
-
 instance (Eq (f (Fix f))) => Eq (Fix f) where
   (In _ a) == (In _ b) = a == b
+
 instance (Ord (f (Fix f))) => Ord (Fix f) where
   compare (In _ a) (In _ b) = compare a b
 
@@ -207,7 +236,6 @@ metadata :: Functor f => Lens' (Fix f) (Maybe Metadata)
 metadata fun (In p o) = fmap (\p' -> In p' o) (fun p)
 
 -- | The lens to convert to/from 'Fix' and its content.
-
 fix :: forall f. Functor f => Iso' (Fix f) (f (Fix f))
 fix = iso _out go
   where
@@ -215,8 +243,6 @@ fix = iso _out go
     go ffixf = In Nothing ffixf
 
 -- * Syntax tree utility
-
-
 
 -- | Languages are 'Fix' over 'Sum' of functors
 type Lang (fs :: [ * -> * ]) = Fix (Sum fs)
@@ -308,20 +334,18 @@ af +:: afs = affs
 -- | Override a specific algebra @f@ in an algebra over @fs@.
 
 (>::) :: (f ∈ fs) => Algebrogen f a b -> Algebrogen (Sum fs) a b -> Algebrogen (Sum fs) a b
-af >:: afs= affs
+af >:: afs = affs
   where
     affs ((^? constructor) -> Just fa) = af  fa
     affs x                             = afs x
 
 -- | Override a subset algebra @fs@ within wider algebra @gs@.
 
-(>>::) :: (fs ⊆ gs) => Algebrogen (Sum fs) a b -> Algebrogen (Sum gs) a b -> Algebrogen (Sum gs) a b
-af >>:: afs= affs
+(>>::) :: (fs ⊆ gs) => Algebrogen (Sum fs) a b -> Algebrogen (Sum gs) a b
+       -> Algebrogen (Sum gs) a b
+af >>:: afs = affs
   where
     affs ((^? subrep) -> Just fa) = af  fa
     affs x                        = afs x
-
-
-
 
 infixr 5 +::, >::, >>::

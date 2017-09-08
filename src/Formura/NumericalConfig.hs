@@ -1,4 +1,5 @@
-{-# LANGUAGE DeriveDataTypeable, TemplateHaskell #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TemplateHaskell    #-}
 
 module Formura.NumericalConfig where
 
@@ -21,20 +22,21 @@ data NumericalConfig = NumericalConfig
   , _ncInitialWalls :: M.Map String [Int]
   , _ncWallInverted :: Maybe Bool
   , _ncOptionStrings :: [String]
-  }
- deriving (Eq, Ord, Read, Show, Typeable, Data)
+  } deriving (Eq, Ord, Read, Show, Typeable, Data)
+
 makeClassy ''NumericalConfig
 
 
-$(deriveJSON (let toSnake = packed %~ snakify in
-               defaultOptions{fieldLabelModifier = toSnake . drop 3,
-                              constructorTagModifier = toSnake,
-                              omitNothingFields = True})
+$(deriveJSON (let toSnake = packed %~ snakify
+              in defaultOptions { fieldLabelModifier = toSnake . drop 3
+                                , constructorTagModifier = toSnake
+                                , omitNothingFields = True
+                                })
   ''NumericalConfig)
 
+
 defaultNumericalConfig :: NumericalConfig
-defaultNumericalConfig =
-  NumericalConfig
+defaultNumericalConfig = NumericalConfig
   { _ncIntraNodeShape = Vec []
   , _ncMPIGridShape = Vec []
   , _ncTemporalBlockingInterval = 1
@@ -42,28 +44,27 @@ defaultNumericalConfig =
   , _ncInitialWalls = M.empty
   , _ncWallInverted = Nothing
   , _ncOptionStrings = []
-     }
+  }
+
 
 nbuSize :: String -> NumericalConfig -> Int
-nbuSize a nc = let kwd = "nbu" ++ a
-  in head $ [ read $ drop (length kwd) opt
-  | opt <- nc ^. ncOptionStrings
-  , kwd `isPrefixOf` opt
-  ] ++ [1]
+nbuSize a nc = head $ [ read $ drop (length kwd) opt
+                      | opt <- nc ^. ncOptionStrings
+                      , kwd `isPrefixOf` opt
+                      ] ++ [1]
+  where kwd = "nbu" ++ a
+
 
 exprBindSize :: NumericalConfig ->  Int
-exprBindSize nc = let kwd = "expr-bind-size-"
-  in head $ [ read $ drop (length kwd) opt
-  | opt <- nc ^. ncOptionStrings
-  , kwd `isPrefixOf` opt
-  ] ++ [1]
-
-
+exprBindSize nc = head $ [ read $ drop (length kwd) opt
+                         | opt <- nc ^. ncOptionStrings
+                         , kwd `isPrefixOf` opt
+                         ] ++ [1]
+  where kwd = "expr-bind-size-"
 
 
 sampleNumericalConfig :: NumericalConfig
-sampleNumericalConfig =
-  NumericalConfig
+sampleNumericalConfig = NumericalConfig
   { _ncIntraNodeShape = Vec [128, 64, 32]
   , _ncMPIGridShape = Vec [5, 20, 40]
   , _ncTemporalBlockingInterval = 4
@@ -71,4 +72,4 @@ sampleNumericalConfig =
   , _ncInitialWalls = M.fromList [("x",[66]), ("y", [34]), ("z", [12,22]) ]
   , _ncWallInverted = Nothing
   , _ncOptionStrings = []
-     }
+  }

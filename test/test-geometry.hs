@@ -1,16 +1,15 @@
-{-# LANGUAGE ImplicitParams, TemplateHaskell #-}
+{-# LANGUAGE ImplicitParams  #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
 import Algebra.Lattice.Levitated
-import Control.Monad.Reader
 import Data.Monoid
 
-import Test.Framework (defaultMain, testGroup)
-import Test.Framework.Providers.QuickCheck2 (testProperty)
-import Test.Framework.Providers.HUnit (testCase)
+import Test.Framework (defaultMain)
 import Test.Framework.Providers.API (Test)
-import Test.QuickCheck hiding ((==>))
+import Test.Framework.Providers.HUnit (testCase)
+import Test.Framework.Providers.QuickCheck2 (testProperty)
 import Test.HUnit.Base hiding (Test)
 
 import Formura.Geometry
@@ -30,7 +29,7 @@ tests =
       (Orthotope (pure Bottom) (pure Top) :: Partition)
   , testProperty "Finite Orthotope moves as expected." $ \vx vy ax ay bx by ->
       move (Vec [vx,vy]) (Orthotope (Vec [ax,ay]) (Vec [bx,by])) ==
-      (Orthotope (Vec [ax+vx,ay+vy]) (Vec [bx+vx,by+vy]))
+      Orthotope (Vec [ax+vx,ay+vy]) (Vec [bx+vx,by+vy])
   , testProperty "Infinite Orthotope moves as expected." $ \vx vy ax bx ->
       move (Vec [vx,vy]) (Orthotope (Vec [pure ax,Top]) (Vec [pure bx,Bottom])) ==
       (Orthotope (Vec [pure $ ax+vx,Top]) (Vec [pure $ bx+vx,Bottom]) :: Partition)

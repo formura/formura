@@ -1,4 +1,9 @@
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, PackageImports, RankNTypes, TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE PackageImports    #-}
+{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE ViewPatterns      #-}
 module Formura.Interpreter.Eval where
 
 import           Control.Applicative
@@ -8,16 +13,15 @@ import qualified Data.Map as M
 import qualified Data.Vector as V
 import           Text.Trifecta (failed, raiseErr)
 
-import           Formura.Interpreter.Value
-import           Formura.Compiler
-import           Formura.Language.Combinator
-import           Formura.Syntax
+import Formura.Compiler
+import Formura.Interpreter.Value
+import Formura.Language.Combinator
+import Formura.Syntax
 
 
 type Binding = M.Map IdentName TypedValue
 
-data Environment =
-  Environment
+data Environment = Environment
   { _envDimension :: Int
   , _envExtent :: [Int]
   , _envCS :: CompilerSyntacticState
@@ -26,7 +30,7 @@ data Environment =
 makeLenses ''Environment
 
 defaultEnvironment :: Environment
-defaultEnvironment = Environment 0 [] defaultCompilerSyntacticState{ _compilerStage = "interpretation" }
+defaultEnvironment = Environment 0 [] defaultCompilerSyntacticState { _compilerStage = "interpretation" }
 
 instance HasCompilerSyntacticState Environment where
   compilerSyntacticState = envCS
@@ -97,8 +101,7 @@ voidEval :: a -> IM TypedValue
 voidEval _ = raiseErr $ failed "eval of void unimplemented."
 
 instance Evalable RExpr where
-  eval = mfold2 (eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: voidEval
-                  :: RExprF TypedValue -> IM TypedValue)
+  eval = mfold2 (eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: voidEval :: RExprF TypedValue -> IM TypedValue)
 
 
 ret :: Iso' [Int] Int

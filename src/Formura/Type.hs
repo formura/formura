@@ -1,9 +1,14 @@
-{-# LANGUAGE DataKinds, FlexibleContexts, FlexibleInstances, TypeOperators, TypeSynonymInstances #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE TypeOperators        #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 module Formura.Type where
 
-import Algebra.Lattice
+import           Algebra.Lattice
+import           Data.Maybe (fromMaybe)
 import qualified Data.Set as S
-import Data.Tuple(swap)
+import           Data.Tuple (swap)
 
 import Formura.Language.Combinator
 import Formura.Syntax
@@ -15,7 +20,7 @@ type ElementalType = Lang '[TopTypeF, ElemTypeF]
 
 instance MeetSemiLattice ElementalType where
   (ElemType ea) /\ (ElemType eb) =
-    case elementTypenameDecode(max (elementTypenameEncode ea) (elementTypenameEncode eb)) of
+    case elementTypenameDecode (max (elementTypenameEncode ea) (elementTypenameEncode eb)) of
      "top" -> TopType
      str   -> ElemType str
   _ /\ _ = TopType
@@ -35,11 +40,7 @@ elementTypenameTable = flip zip [0..]
                        ,"Real"]
 
 elementTypenameEncode :: String -> Int
-elementTypenameEncode str = case lookup str elementTypenameTable of
-  Just i -> i
-  Nothing -> maxBound
+elementTypenameEncode str = fromMaybe maxBound $ lookup str elementTypenameTable
 
 elementTypenameDecode :: Int -> String
-elementTypenameDecode i = case lookup i (map swap elementTypenameTable) of
-  Just n -> n
-  Nothing -> "top"
+elementTypenameDecode i = fromMaybe "top" $ lookup i $ map swap elementTypenameTable

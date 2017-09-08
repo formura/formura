@@ -1,4 +1,5 @@
-{-# LANGUAGE ImplicitParams, TypeFamilies #-}
+{-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE TypeFamilies   #-}
 module Formura.OrthotopeMachine.TemporalBlocking where
 
 import           Control.Lens
@@ -6,8 +7,8 @@ import qualified Data.Map as M
 import           Data.Maybe
 
 import Formura.CommandLineOption
-import Formura.Syntax
 import Formura.OrthotopeMachine.Graph
+import Formura.Syntax
 {-
 
 data Node instType typeType = Node {_nodeInst :: instType, _nodeType :: typeType, _nodeAnnot :: A.Annotation}
@@ -79,11 +80,11 @@ temporalBlocking tbFoldingNumber mmprog0 = mmprog0 & omStepGraph .~ stepGraphN
       stepGraph0
 
     addOMStride :: OMNodeID -> MMGraph -> MMGraph
-    addOMStride i gr = let
-      go :: MicroInstruction -> MicroInstruction
-      go (LoadCursor v j) = LoadCursor v (i+j)
-      go x = x
-      in microInstsOfMMGraph %~ go $ M.mapKeys (+i) gr
+    addOMStride i gr = microInstsOfMMGraph %~ go $ M.mapKeys (+i) gr
+      where
+        go :: MicroInstruction -> MicroInstruction
+        go (LoadCursor v j) = LoadCursor v (i+j)
+        go x = x
 
     microInstsOfMMGraph :: Traversal' MMGraph MicroInstruction
     microInstsOfMMGraph = traverse . nodeInst . traverse . nodeInst
@@ -115,10 +116,8 @@ temporalBlocking tbFoldingNumber mmprog0 = mmprog0 & omStepGraph .~ stepGraphN
           go (GridType v x) = GridType v $ go x
           go (ElemType e)   = ElemType e
           go _              = TopType
-        in
-        nd0
-        & nodeInst %~ betailMMInst
-        & nodeType .~ typ1
+        in nd0 & nodeInst %~ betailMMInst
+               & nodeType .~ typ1
       Nothing -> nd0
 
     betailMMInst :: MMInstruction -> MMInstruction
@@ -126,7 +125,5 @@ temporalBlocking tbFoldingNumber mmprog0 = mmprog0 & omStepGraph .~ stepGraphN
 
     storeToReturn :: MicroNode -> MicroNode
     storeToReturn nd0 = case nd0 ^. nodeInst of
-      (Store _ x) ->
-        nd0
-        & nodeInst .~ Uniop "+" x
+      (Store _ x) -> nd0 & nodeInst .~ Uniop "+" x
       _ -> nd0

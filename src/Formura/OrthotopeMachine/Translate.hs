@@ -1,4 +1,15 @@
-{-# LANGUAGE DataKinds, DeriveFunctor, DeriveFoldable, DeriveTraversable, FlexibleContexts, FlexibleInstances, GADTs, PackageImports, PatternSynonyms, ScopedTypeVariables, TemplateHaskell, TypeOperators, ViewPatterns #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE DeriveFoldable      #-}
+{-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE DeriveTraversable   #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE FlexibleInstances   #-}
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE PackageImports      #-}
+{-# LANGUAGE PatternSynonyms     #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TypeOperators       #-}
 module Formura.OrthotopeMachine.Translate where
 
 import           Algebra.Lattice
@@ -8,20 +19,20 @@ import           Control.Monad
 import "mtl"     Control.Monad.Reader hiding (fix)
 import           Data.Foldable
 import qualified Data.Map as M
-import qualified Data.Set as S
 import           Data.Ratio
+import qualified Data.Set as S
 import           Text.Trifecta (failed, raiseErr)
 
-import           Formura.Language.Combinator
-import           Formura.Language.TExpr
 import qualified Formura.Annotation as A
 import           Formura.Annotation.Representation
 import           Formura.Compiler
 import           Formura.GlobalEnvironment
+import           Formura.Language.Combinator
+import           Formura.Language.TExpr
+import           Formura.OrthotopeMachine.Graph
 import           Formura.Syntax
 import           Formura.Type
 import           Formura.Vec
-import           Formura.OrthotopeMachine.Graph
 
 
 type Binding = M.Map IdentName ValueExpr
@@ -38,6 +49,7 @@ data CodegenState = CodegenState
   , _codegenGlobalEnvironment :: GlobalEnvironment
   , _theGraph :: OMGraph
   }
+
 makeClassy ''CodegenState
 
 instance HasGlobalEnvironment CodegenState where
@@ -48,7 +60,7 @@ instance HasCompilerSyntacticState CodegenState where
 
 defaultCodegenState :: CodegenState
 defaultCodegenState = CodegenState
-  { _codegenSyntacticState = defaultCompilerSyntacticState{ _compilerStage = "codegen"}
+  { _codegenSyntacticState = defaultCompilerSyntacticState {_compilerStage = "codegen"}
   , _theGraph = M.empty
   , _codegenGlobalEnvironment = defaultGlobalEnvironment
   }
@@ -107,8 +119,8 @@ insert inst typ = do
   theGraph %= M.insert n0 (Node inst typ a)
   mmeta <- use compilerFocus
   case mmeta of
-       Just meta -> theGraph . ix n0 . A.annotation %= A.set meta
-       _         -> return ()
+    Just meta -> theGraph . ix n0 . A.annotation %= A.set meta
+    _         -> return ()
 
   return $ NodeValue n0 typ
 
@@ -130,7 +142,6 @@ castVal t1 vx = let t0 = typeOfVal vx in case (t1, t0, vx) of
   (GridType vec (ElemType te), ElemType _, n :. _) -> return (n :. GridType vec (ElemType te))
   (GridType vec0 _, GridType vec1 _, _) | vec0 == vec1 ->  return vx
   _ -> raiseErr $ failed $ "cannot convert type " ++ show t0 ++ " to " ++ show t1
-
 
 
 instance Generatable ImmF where
@@ -159,6 +170,7 @@ instance Generatable OperatorF where
 
 
 type MVsT = Maybe ([OMNodeID], OMNodeType)
+
 goNaryop :: IdentName -> [ValueExpr] -> GenM ValueExpr
 goNaryop op xs = do
   mvst <- foldrM foldVT Nothing xs
@@ -296,7 +308,6 @@ goApply (Tuple xs) (Imm r) = do
       l = length xs
   when (n < 0 || n >= l) $ raiseErr $ failed "tuple access out of bounds"
   return $ xs!!n
-
 goApply x@(Tuple _) arg0 = do
   i <- evalToImm arg0
   case i of
@@ -304,7 +315,6 @@ goApply x@(Tuple _) arg0 = do
     _ -> do
       g <- use theGraph
       raiseErr $ failed $ "tuple applied to non-constant integer: " ++ show arg0 ++ show g
-
 goApply (FunValue l r) x = do
   lrs <- matchToLhs l x
   let x2 :: Binding
@@ -328,8 +338,7 @@ resolveLex :: RXExpr -> LexGenM RXExpr
 resolveLex (Ident n) = do
   b <- ask
   case M.lookup n b of
-    Nothing -> raiseErr $ failed $ "undefined variable: " ++ n ++ "\nwhen resolving lexical binding."
-               ++ "\n Bindings:\n" ++ unwords (M.keys b)
+    Nothing -> raiseErr $ failed $ "undefined variable: " ++ n ++ "\nwhen resolving lexical binding." ++ "\n Bindings:\n" ++ unwords (M.keys b)
     Just x  -> return $ subFix x
 resolveLex (Lambda l r) = do
   r' <- local (M.union (lexicalScopeHolder l)) $ resolveLex $ subFix r
@@ -390,7 +399,6 @@ matchValueExprToLhs (Grid npk lx) vx = do
   forM ivx $ \(i,v) -> do
     v2 <- gen (GridF (negate npk) (return v))
     return (i,v2)
-
 matchValueExprToLhs lx vx = matchToLhs lx vx
 
 -- | Create a Binding so that names in the LExpr become free variables,
@@ -545,8 +553,6 @@ genGlobalFunction globalBinding inputType outputPattern (Lambda l r) =  bindThem
   return $ typeExprOf returnValueExpr
   where
     bindThemAll = withBindings $ fmap (genRhs .subFix) globalBinding
-
-
 genGlobalFunction _ _ _ _ = raiseErr $ failed "Identifier specified for function generation is not of function type."
 
 lookupToplevelIdents :: Program -> IdentName -> GenM RExpr

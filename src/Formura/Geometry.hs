@@ -7,7 +7,13 @@ Stability   : experimental
 Module for geometry inference.
 -}
 
-{-# LANGUAGE DeriveDataTypeable, DeriveFunctor, DeriveFoldable, DeriveTraversable, FlexibleInstances, TemplateHaskell, TypeSynonymInstances #-}
+{-# LANGUAGE DeriveDataTypeable   #-}
+{-# LANGUAGE DeriveFoldable       #-}
+{-# LANGUAGE DeriveFunctor        #-}
+{-# LANGUAGE DeriveTraversable    #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE TemplateHaskell      #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module Formura.Geometry where
 
@@ -19,13 +25,13 @@ import Formura.Vec
 
 type Pt = Vec Int
 
-data Orthotope a = Orthotope { _lowerVertex :: Vec a ,
-                   _upperVertex :: Vec a}
-           deriving (Eq, Ord, Read, Functor, Foldable, Traversable, Data)
+data Orthotope a = Orthotope
+  { _lowerVertex :: Vec a
+  , _upperVertex :: Vec a
+  } deriving (Eq, Ord, Read, Functor, Foldable, Traversable, Data)
 
 instance Show a => Show (Orthotope a) where
   show (Orthotope a b) = "「" ++ show a ++ " " ++ show b ++ "」"
-
 
 makeLenses ''Orthotope
 

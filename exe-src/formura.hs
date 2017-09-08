@@ -12,15 +12,15 @@ import qualified Text.Trifecta as P
 import qualified Formura.Annotation as A
 import           Formura.Annotation.Representation
 import           Formura.CommandLineOption
-import           Formura.OrthotopeMachine.Graph
-import           Formura.OrthotopeMachine.Translate (genOMProgram)
-import           Formura.OrthotopeMachine.Manifestation (genMMProgram)
-import qualified Formura.Parser as P
 import           Formura.Desugar
-import           Formura.Syntax
 import           Formura.MPICxx.Language (TargetLanguage(..), targetLanguage)
 import qualified Formura.MPICxx.Translate as C
 import qualified Formura.MPIFortran.Translate as F
+import           Formura.OrthotopeMachine.Graph
+import           Formura.OrthotopeMachine.Manifestation (genMMProgram)
+import           Formura.OrthotopeMachine.Translate (genOMProgram)
+import qualified Formura.Parser as P
+import           Formura.Syntax
 
 main :: IO ()
 main = do

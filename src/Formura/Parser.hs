@@ -9,39 +9,44 @@ Stability   : experimental
 This module contains combinator for writing Formura parser, and also the parsers for Formura syntax.
 -}
 
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, ImplicitParams, TypeFamilies, TypeOperators #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImplicitParams             #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeOperators              #-}
 module Formura.Parser where
 
-import Control.Applicative
-import Control.Lens
-import Control.Monad
-import Data.Char (isSpace, isLetter, isAlphaNum, isPrint, toUpper)
-import Data.Either (partitionEithers)
-import Data.Foldable (toList)
-import Data.Maybe
-import Data.Monoid
+import           Control.Applicative
+import           Control.Lens
+import           Control.Monad
+import           Data.Char (isAlphaNum, isLetter, isPrint, isSpace, toUpper)
+import           Data.Either (partitionEithers)
+import           Data.Foldable (toList)
+import           Data.Maybe
+import           Data.Monoid
 import qualified Data.Set as S
-import System.IO.Unsafe
-import Text.Trifecta hiding (ident)
-import Text.Trifecta.Delta
+import           System.IO.Unsafe
 import qualified Text.Parser.Expression as X
 import qualified Text.PrettyPrint.ANSI.Leijen as Ppr
+import           Text.Trifecta hiding (ident)
+import           Text.Trifecta.Delta
 
 import Text.Parser.LookAhead
 
-import Formura.Utilities (readYamlDef)
 import Formura.CommandLineOption
 import Formura.Language.Combinator
 import Formura.NumericalConfig
-import Formura.Type (elementTypenames)
-import Formura.Vec
 import Formura.Syntax
+import Formura.Type (elementTypenames)
+import Formura.Utilities (readYamlDef)
+import Formura.Vec
 
 -- * The parser comibnator
 
 -- | The parser monad.
 newtype P a = P { runP :: Parser a }
-            deriving (Alternative, Monad, Functor, MonadPlus, Applicative, CharParsing, LookAheadParsing, Parsing, DeltaParsing, MarkParsing Delta)
+  deriving (Alternative, Monad, Functor, MonadPlus, Applicative,
+            CharParsing, LookAheadParsing, Parsing, DeltaParsing, MarkParsing Delta)
 
 instance Errable P where
   raiseErr = P . raiseErr
@@ -52,11 +57,7 @@ instance TokenParsing P where
          f '\r' = False
          f x | isSpace x = True
              | otherwise = False
-
-    in "whitespace" ?> some ((satisfy f >> return ())
-             <|> comment
-             <|> lineContinuation)
-       >> return ()
+    in "whitespace" ?> void (some ((void $ satisfy f) <|> comment <|> lineContinuation))
 
 -- | Document the parser.
 (?>) :: String -> P a -> P a
@@ -77,14 +78,12 @@ keyword k = "keyword " ++ k ?> do
 -- | The set of reserved keywords. The string is not parsed as a identifier if it's in the keyword list.
 keywordSet :: S.Set IdentName
 keywordSet = S.fromList
-             ["begin", "end", "function", "returns", "let", "in",
-              "fun", "dimension", "axes",
-              "if", "then", "else",
-              "const","extern","manifest",
-              "+","-","*","/",".","**",
-              "::","=", ","]
-             <> minMaxOperatorNames
-             <> comparisonOperatorNames
+               ["begin", "end", "function", "returns", "let", "in", "fun"
+               , "dimension", "axes", "if", "then", "else", "const", "extern", "manifest"
+               , "+", "-", "*", "/", ".", "**", "::", "=", ","
+               ]
+           <> minMaxOperatorNames
+           <> comparisonOperatorNames
 
 
 comment :: P ()
@@ -114,12 +113,13 @@ parseIn p = do
 
 isIdentifierAlphabet0 :: Char -> Bool
 isIdentifierAlphabet0 = isLetter
+
 isIdentifierAlphabet1 :: Char -> Bool
 isIdentifierAlphabet1 c = isAlphaNum c || c == '_'  || c == '\''
+
 isIdentifierSymbol :: Char -> Bool
 isIdentifierSymbol c = isPrint c &&
-  not (isIdentifierAlphabet1 c || isSpace c ||
-      c `elem` "\"#();[\\]{}")
+  not (isIdentifierAlphabet1 c || isSpace c || c `elem` "\"#();[\\]{}")
 
 identName :: P IdentName
 identName = identNameWith "SA"
@@ -140,11 +140,10 @@ identNameWith sw = "identifier" ?> try $ do
   str <- case sw of
     "S" -> s
     "A" -> a
-    _ -> s <|> a
+    _   -> s <|> a
   guard $  str `S.notMember` keywordSet
   whiteSpace
   return str
-
 
 
 ident :: (IdentF ∈ fs) => P (Lang fs)
@@ -155,6 +154,7 @@ elemType = "element type" ?> parseIn $ do
   str <- identName
   guard $ str `S.member` elementTypenames
   return $ ElemType str
+
 
 funType :: (FunTypeF ∈ fs) => P (Lang fs)
 funType = "function type" ?> parseIn $ keyword "function" *> pure FunType
@@ -172,12 +172,14 @@ tupleOf p = "tuple" ?> {- don't parseIn here ... -} do
     [x] -> return x
     _   -> return $ In (Just $ Metadata r1 (delta r1) (delta r2)) $ Tuple xs
 
+
 gridIndicesOf :: P a -> P (Vec a)
 gridIndicesOf parseIdx = "grid index" ?> do
   "grid opening" ?> try $ symbolic '['
   xs <- parseIdx `sepBy` symbolic ','
   symbolic ']'
   return $ Vec xs
+
 
 nPlusK :: P NPlusK
 nPlusK = "n+k pattern" ?>  do
@@ -187,34 +189,36 @@ nPlusK = "n+k pattern" ?>  do
     n <- constRationalExpr
     if s == '+' then return n else return (negate n)
   lookAhead (symbolic ',' <|> symbolic ']')
-  return $ NPlusK (fromMaybe "" mx) (maybe 0 id mn)
+  return $ NPlusK (fromMaybe "" mx) (fromMaybe 0 mn)
 
 
 imm :: (ImmF ∈ fs) => P (Lang fs)
 imm = "rational literal" ?> parseIn $
   Imm <$> constRational
 
+
 exprOf :: (OperatorF ∈ fs, ApplyF  ∈ fs) => P (Lang fs) -> P (Lang fs)
 exprOf termParser = X.buildExpressionParser tbl termParser
   where
-    tbl = [[binary "." (Binop ".") X.AssocRight],
-           [binary "**" (Binop "**") X.AssocLeft],
-           [binary "*" (Binop "*") X.AssocLeft, binary "/" (Binop "/") X.AssocLeft],
-           [unary "+" (Uniop "+") , unary "-" (Uniop "-") ],
-           [binary "+" (Binop "+") X.AssocLeft, binary "-" (Binop "-") X.AssocLeft],
-           [binary sym (catNary sym) X.AssocLeft | sym <- S.toList minMaxOperatorNames],
-           [binary sym (Binop sym) X.AssocNone | sym <- S.toList comparisonOperatorNames]
+    tbl = [ [binary "." (Binop ".") X.AssocRight]
+          , [binary "**" (Binop "**") X.AssocLeft]
+          , [binary "*" (Binop "*") X.AssocLeft, binary "/" (Binop "/") X.AssocLeft]
+          , [unary "+" (Uniop "+") , unary "-" (Uniop "-")]
+          , [binary "+" (Binop "+") X.AssocLeft, binary "-" (Binop "-") X.AssocLeft]
+          , [binary sym (catNary sym) X.AssocLeft | sym <- S.toList minMaxOperatorNames]
+          , [binary sym (Binop sym) X.AssocNone | sym <- S.toList comparisonOperatorNames]
           ]
     unary  name fun = X.Prefix (pUni name fun)
     binary name fun assoc = X.Infix (pBin name fun) assoc
 
     catNary sim a b = let
-      aparts = case a of Naryop sim' xs | sim == sim' -> xs
-                         _                          -> [a]
-      bparts = case b of Naryop sim' xs | sim == sim' -> xs
-                         _                          -> [b]
+      aparts = case a of
+                 Naryop sim' xs | sim == sim' -> xs
+                 _ -> [a]
+      bparts = case b of
+                 Naryop sim' xs | sim == sim' -> xs
+                 _ -> [b]
       in Naryop sim $ aparts ++ bparts
-
 
     pUni name fun = "unary operator " ++ name ?> do
       r1 <- rend
@@ -237,6 +241,7 @@ exprOf termParser = X.buildExpressionParser tbl termParser
         Just mb -> max (mb ^. metadataEnd) (delta r2)
       in Metadata r1 da db
 
+
 expr10 :: P RExpr
 expr10 = fexpr
 
@@ -250,7 +255,7 @@ fexpr = "function application chain" ?> do
       mx' <- optional $ gridIndicesOf nPlusK
       case mx' of
         Just x -> findArgument $ Grid x f
-        Nothing ->do
+        Nothing -> do
           mx <- optional aexpr
           case mx of
             Just x -> findArgument $ Apply f x
@@ -269,12 +274,14 @@ letExpr = "let expression" ?> parseIn $ do
   x <- rExpr
   return $ Let xs x
 
+
 lambdaExpr :: P RExpr
 lambdaExpr = "lambda expression" ?> parseIn $ do
   "keyword fun" ?> try $ keyword "fun"
   x <- tupleOf lExpr
   y <- rExpr
   return $ Lambda x y
+
 
 ifThenElseExpr :: P RExpr
 ifThenElseExpr = "if-then-else expression" ?> parseIn $ do
@@ -292,13 +299,16 @@ binding = "statements" ?> do
   stmts <- statementCompound `sepEndBy` statementDelimiter
   return $ Binding $ concat stmts
 
+
 statementDelimiter :: P ()
-statementDelimiter = "statement delimiter" ?> some d >> return ()
+statementDelimiter = "statement delimiter" ?> void (some d)
   where
-    d = (symbolic ';' >> return ()) <|> (newline >> whiteSpace)
+    d = (void $ symbolic ';') <|> (newline >> whiteSpace)
+
 
 statementCompound :: P [StatementF RExpr]
 statementCompound = functionSyntaxSugar <|> typeValueStatements
+
 
 functionSyntaxSugar :: P [StatementF RExpr]
 functionSyntaxSugar = "function definition" ?> do
@@ -362,8 +372,6 @@ typeValueStatements = "type-decl and/or substitiution statement" ?> do
                    | (lhs, Just rhs) <- lamrs]
   -- Type definitions always come before the values.
   return $ typePart ++ substPart
-
-
 
 
 lAexpr :: P LExpr
