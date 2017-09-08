@@ -29,6 +29,7 @@ instance Foldable Vec where
 
 instance J.ToJSON a => J.ToJSON (Vec a) where
   toJSON (Vec xs) = J.toJSON xs
+  toJSON _ = error "no match(Formura.Vec.toJSON)"
 
 instance J.FromJSON a => J.FromJSON (Vec a) where
   parseJSON j = Vec <$> J.parseJSON j

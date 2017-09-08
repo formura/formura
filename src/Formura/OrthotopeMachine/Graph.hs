@@ -120,9 +120,9 @@ semiLatticeOfOMNodeType a b = case go a b of
   c       -> c
   where
     go :: OMNodeType -> OMNodeType -> OMNodeType
-    go a b | a == b = a
+    go x y | x == y = x
     go (ElemType ea) (ElemType eb) = subFix (ElemType ea /\ ElemType eb :: ElementalType)
-    go a@(ElemType _) (GridType v c) = let d = a /\ c in
+    go x@(ElemType _) (GridType v c) = let d = x /\ c in
            if d==TopType then TopType else GridType v d
     go (GridType v1 c1) (GridType v2 c2) = if v1 == v2 then GridType v1 (c1 /\ c2) else TopType
     go _ _          = TopType
@@ -131,6 +131,7 @@ mapElemType :: (IdentName -> IdentName) -> OMNodeType -> OMNodeType
 mapElemType f (ElemType t) = ElemType $ f t
 mapElemType f (GridType v t) = GridType v $ mapElemType f t
 mapElemType _ TopType = TopType
+mapElemType _ _ = error "no match(Formura.OrthotopeMachine.Graph.mapElemType"
 
 data Node instType typeType = Node {_nodeInst :: instType, _nodeType :: typeType, _nodeAnnot :: A.Annotation}
 
@@ -184,6 +185,7 @@ instance Typed ValueExpr where
   typeExprOf (NodeValue _ t) = subFix t
   typeExprOf (FunValue _ _) = FunType
   typeExprOf (Tuple xs) = Tuple $ map typeExprOf xs
+  typeExprOf _ = error "no match (Formura.OrthotopeMachine.Graph.typeExprOf"
 
 data MachineProgram instType typeType = MachineProgram
   { _omGlobalEnvironment :: GlobalEnvironment

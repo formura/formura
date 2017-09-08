@@ -97,5 +97,5 @@ class Geometric a => HasVolume a where
 instance HasVolume Box where
   volume (Orthotope l u) = product $ liftVec2 relu l u
     where
-      relu l u | u <= l    = 0
-               | otherwise = u-l
+      relu l' u' | u' <= l'    = 0
+                 | otherwise = u'-l'

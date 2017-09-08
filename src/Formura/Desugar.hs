@@ -28,7 +28,7 @@ mapEverywhere :: (Data a, Data b) => (b->b) -> a -> a
 mapEverywhere f = everywhere (caster f)
   where
     caster :: (Typeable a) => (a -> a) -> (forall b. Typeable b => b -> b)
-    caster f x = fromMaybe x ((cast =<<) $ f <$> cast x)
+    caster g x = fromMaybe x ((cast =<<) $ g <$> cast x)
 
 
 desugar :: Program -> IO Program

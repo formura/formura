@@ -55,6 +55,7 @@ defaultTranState = TranState
   , _theGraph = M.empty
   , _theMMInstruction = M.empty
   , _nodeIDMap = M.empty
+  , _isManifestNode = error "_isManifestNode is unset"
   }
 
 type TranM = CompilerMonad GlobalEnvironment () TranState
@@ -212,9 +213,9 @@ manifestation omprog = do
 boundaryAnalysis :: Vec Int -> MMGraph -> MMGraph
 boundaryAnalysis fixer gr =
   flip M.mapWithKey gr $
-  \ k nd -> case M.lookup k bgr of
-  Just b ->  nd & A.annotation %~ A.set (fix $ b <> Boundary (0,0))
-  Nothing -> nd
+    \k nd -> case M.lookup k bgr of
+      Just b ->  nd & A.annotation %~ A.set (fix $ b <> Boundary (0,0))
+      Nothing -> nd
   where
     fix :: Boundary -> Boundary
     fix (Boundary (lo,hi)) = error $ show (lo,hi)--Boundary (lo, hi-fixer)

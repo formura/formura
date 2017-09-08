@@ -5,9 +5,9 @@ module Formura.MPICxx.Translate where
 import           Control.Applicative
 import           Control.Concurrent(threadDelay)
 import qualified Control.Exception as X
-import           Control.Lens
+import           Control.Lens hiding (op, ix)
 import           Control.Monad
-import "mtl"     Control.Monad.RWS
+import "mtl"     Control.Monad.RWS hiding (fix)
 import           Data.Char (toUpper, isAlphaNum)
 import           Data.Foldable (toList)
 import           Data.Function (on)
@@ -205,13 +205,13 @@ setNamingState = do
         cName <- genFreeName initName
         return $ nd & A.annotation %~ A.set (VariableName cName)
 
-  gr <- use omInitGraph
-  gr2 <- flip traverse gr $ nameNode
-  omInitGraph .= gr2
+  igr <- use omInitGraph
+  igr2 <- flip traverse igr $ nameNode
+  omInitGraph .= igr2
 
-  gr <- use omStepGraph
-  gr2 <- flip traverse gr $ nameNode
-  omStepGraph .= gr2
+  sgr <- use omStepGraph
+  sgr2 <- flip traverse sgr $ nameNode
+  omStepGraph .= sgr2
 
 
 -- | Generate C type declaration for given language.
@@ -237,12 +237,14 @@ elemTypeOfResource (ResourceStatic sname _) = do
   case typ of
     ElemType _ -> return typ
     GridType _ etyp -> return etyp
+    _ -> error "no match"
 elemTypeOfResource (ResourceOMNode nid _) = do
   mmProg <- use omStepGraph
   let Just nd = M.lookup nid mmProg
   case nd ^.nodeType of
     ElemType x -> return $ ElemType x
     GridType _ etyp -> return $ subFix etyp
+    _ -> error "no match"
 
 tellMPIRequestDecl :: C.Src -> TranM ()
 tellMPIRequestDecl name = do
@@ -301,9 +303,9 @@ tellFacetDecl f rs = do
   ralloc <- use planRidgeAlloc
 
   forM_ rs $ \rk -> do
-    name <- nameRidgeResource' True rk SendRecv
+    name' <- nameRidgeResource' True rk SendRecv
     let Just box0 = M.lookup rk ralloc
-    tellResourceDecl' True name (rk ^. ridgeDelta) box0
+    tellResourceDecl' True name' (rk ^. ridgeDelta) box0
 
   tellH "};"
 
@@ -522,6 +524,7 @@ genMMInstruction ir0 mminst = do
       genRefCnt (LoadExtent _) = []
       genRefCnt (LoadCursor _ _) = []
       genRefCnt (LoadCursorStatic _ _) = []
+      genRefCnt _ = error "no match"
 
       doesSpine :: MMNodeID -> Bool
       doesSpine nid =  case A.viewMaybe  $ fromJust $ M.lookup nid mminst  of
@@ -988,8 +991,8 @@ tellProgram = do
   mPIPlan .= plan
 
   tsMPIPlanSelection .= True
-  plan <- liftIO $ makePlan (nc & ncWallInverted .~ Just True) mmprog
-  mPIPlan .= plan
+  plan' <- liftIO $ makePlan (nc & ncWallInverted .~ Just True) mmprog
+  mPIPlan .= plan'
 
   collaboratePlans
 
@@ -1252,6 +1255,7 @@ genCxxFiles formuraProg mmProg0 = do
       , _tsMPIPlanMap = M.empty
       , _tsCommonStaticBox = error "_tsCommonStaticBox is unset"
       , _tsCxxTemplateWithMacro = error "_tsCxxTemplateWithMacro is unset"
+      , _tsCommonOMNodeBox = error "_tsCommonOMNodeBox is unset"
       }
 
 
@@ -1260,7 +1264,7 @@ genCxxFiles formuraProg mmProg0 = do
        (mmProgTB ^. omGlobalEnvironment)
        tranState0
 
-  (CProgram hxxContent cxxContent auxFilesContent) <-
+  (CProgram hxxContent cxxContent auxFilesContent') <-
     if (elem "no-subroutine" $ tranState1 ^. ncOptionStrings) then return cprog0
     else joinSubroutines cprog0
 
@@ -1269,7 +1273,7 @@ genCxxFiles formuraProg mmProg0 = do
   T.writeFile hxxFilePath $ C.toText hxxContent
   T.writeFile cxxFilePath $ C.toText cxxContent
 
-  let funcs = cluster [] $ M.elems auxFilesContent
+  let funcs = cluster [] $ M.elems auxFilesContent'
       cluster :: [C.Src] -> [C.Src] -> [C.Src]
       cluster accum [] = reverse accum
       cluster [] (x:xs) = cluster [x] xs

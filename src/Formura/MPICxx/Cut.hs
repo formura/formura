@@ -331,11 +331,11 @@ cut = do
       putStrLn $ "    " ++ show (boxAssignment mpiRankOrigin ir nid)
 -}
   let supportMap :: M.Map (IRank, OMNodeID) (M.Map Resource Box)
-      supportMap = M.fromList [((ir, nid), go ir nid (fromJust $ M.lookup nid stepGraph))
+      supportMap = M.fromList [((ir, nid), go2 ir nid (fromJust $ M.lookup nid stepGraph))
                               | ir <- iRanks0, nid <- M.keys stepGraph]
 
-      go :: IRank -> OMNodeID -> MMNode -> M.Map Resource Box
-      go ir nid mmNode = let
+      go2 :: IRank -> OMNodeID -> MMNode -> M.Map Resource Box
+      go2 ir nid mmNode = let
           mmInst :: MMInstruction
           mmInst = mmNode ^. nodeInst
           microInsts :: [MMInstF MMNodeID]
@@ -390,7 +390,7 @@ cut = do
 
 
   let ridgeAndBoxRequest :: M.Map (IRank, OMNodeID) [Ridge]
-      ridgeAndBoxRequest = M.mapWithKey go supportMap
+      ridgeAndBoxRequest = M.mapWithKey go3 supportMap
 
       ridgeRequest :: M.Map (IRank, OMNodeID) [RidgeID]
       ridgeRequest = M.map (map fst) ridgeAndBoxRequest
@@ -404,8 +404,8 @@ cut = do
         ]
 
 
-      go :: (IRank, OMNodeID) -> M.Map Resource Box -> [Ridge]
-      go (ir, _) rbmap =
+      go3 :: (IRank, OMNodeID) -> M.Map Resource Box -> [Ridge]
+      go3 (ir, _) rbmap =
         [ mkRidge ir crsc
         | (rsc,b0) <- M.toList rbmap
         , crsc <- locateSources ir (rsc,b0)

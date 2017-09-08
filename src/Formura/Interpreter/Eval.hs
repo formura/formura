@@ -71,12 +71,15 @@ instance Evalable (OperatorF TypedValue) where
 
 evalUniop :: (forall a. Num a => a -> a) -> TypedValue -> IM TypedValue
 evalUniop f (ElemValue r, t) = return (ElemValue (f r), t)
+evalUniop _ _ = error "no match(Formura.Interpreter.Eval.evalUniop)"
 
 evalBinop :: (forall a. Fractional a => a -> a -> a) -> TypedValue -> TypedValue -> IM TypedValue
 evalBinop f (ElemValue x, tx ) (ElemValue y, _) = return (ElemValue (f x y), tx)
+evalBinop _ _ _ = error "no match(Formura.Interpreter.Eval.evalBinop)"
 
 instance Evalable (TupleF TypedValue) where
   eval (Tuple xts) = return (Tuple $ map fst xts, Tuple $ map snd xts)
+  eval _ = error "no match(Formura.Interpreter.Eval.eval)"
 
 instance Evalable (GridF x) where
   eval _ = raiseErr $ failed "eval of grid unimplemented."

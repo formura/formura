@@ -119,6 +119,7 @@ typeOfVal (Imm _)         = ElemType "Rational"
 typeOfVal (NodeValue _ t) = subFix t
 typeOfVal (FunValue _ _)  = FunType
 typeOfVal (Tuple xs)      = Tuple $ map typeOfVal xs
+typeOfVal _ = error "no match (Formura.OrthotopeMachine.Translate.typeOfVal)"
 
 
 -- | convert a value to other value, so that the result may have the given type
@@ -134,6 +135,7 @@ castVal t1 vx = let t0 = typeOfVal vx in case (t1, t0, vx) of
 
 instance Generatable ImmF where
   gen (Imm r) = insert (Imm r) (ElemType "Rational")
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 spoonTExpr :: (TupleF ∈ fs) => TExpr (Lang fs) -> GenM (Lang fs)
 spoonTExpr x = case x ^? tExpr of
@@ -153,6 +155,7 @@ instance Generatable OperatorF where
         texpr_list_vals = sequenceA list_texpr_vals :: TExpr [ValueExpr]
     ret <- sequence $ goNaryop op <$> texpr_list_vals
     spoonTExpr ret
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 
 type MVsT = Maybe ([OMNodeID], OMNodeType)
@@ -232,12 +235,14 @@ instance Generatable IdentF where
       Nothing ->
         raiseErr $ failed $ "undefined variable: " ++ n ++ "\n Bindings:\n" ++ show b
       Just x  -> return $ subFix x
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 
 instance Generatable TupleF where
   gen (Tuple xsGen) = do
     xs <- sequence xsGen
     return $ Tuple xs
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 instance Generatable GridF where
   gen (Grid npks gen0) = do
@@ -256,6 +261,7 @@ instance Generatable GridF where
           if intOff == 0
                   then return (val0 :. typ1)
                   else insert (Shift (negate intOff) val0) typ1
+        _ -> error "no match"
       Tuple vs -> do
         xs <- sequence [gen $ GridF npks (return v :: GenM ValueExpr) | v <- vs]
         return $ Tuple xs
@@ -271,6 +277,7 @@ instance Generatable ApplyF where
     f0 <- fgen
     a0 <- agen
     goApply f0 a0
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 evalToImm :: ValueExpr -> GenM (Maybe Rational)
 evalToImm x = do
@@ -279,6 +286,7 @@ evalToImm x = do
     Imm r -> return $ Just r
     n :. _ -> case M.lookup n g of
       Just (Node (Imm r) _ _) -> return $ Just r
+      _ -> error "no match"
     _ -> return Nothing
 
 goApply :: ValueExpr -> ValueExpr -> GenM ValueExpr
@@ -311,6 +319,7 @@ instance Generatable LambdaF where
         conv b s = (M.union (lexicalScopeHolder l) $ M.map subFix b, s)
     r' <- withCompiler conv $ resolveLex $ subFix r
     return $ FunValue l r'
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 -- resolveLex :: RXExpr -> LexGenM RXExpr
 -- resolveLex r = compilerMFold resolveLexAlg r
@@ -338,12 +347,14 @@ resolveLex (In meta fx) = do
 
 instance Generatable LetF where
   gen (Let b genX) = withBindings b genX
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 namesOfLhs :: LExpr -> TupleOfIdents
 namesOfLhs (Ident n) = Ident n
 namesOfLhs (Grid _ x) = namesOfLhs x
 namesOfLhs (Vector _ x) = namesOfLhs x
 namesOfLhs (Tuple xs) = Tuple $ map namesOfLhs xs
+namesOfLhs _ = error "no match (Formura.OrthotopeMachine.Translate.namesOfLhs)"
 
 indexNamesOfLhs :: LExpr -> Vec (Maybe IdentName)
 indexNamesOfLhs (Grid npks _) = fmap indexNameOfNPK npks
@@ -370,6 +381,7 @@ matchToIdents = go
     go (Tuple _) (Tuple _) = raiseErr $ failed "tuple length mismatch."
     go (Tuple _) _         = raiseErr $ failed "the LHS expects a tuple, but RHS is not a tuple."
     go (Ident x) y = return [(x,y)]
+    go _ _ = error "no match(Formura.OrthotopeMachine.Translate.matchToIdents)"
 
 
 matchValueExprToLhs :: LExpr -> ValueExpr -> GenM [(IdentName, ValueExpr)]
@@ -486,9 +498,11 @@ instance Generatable (Sum '[]) where
 
 instance Generatable NodeValueF where
   gen (NodeValue t v) = return (NodeValue t v)
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 instance Generatable FunValueF where
   gen (FunValue l r) = return (FunValue l r)
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 instance (Generatable f, Generatable (Sum fs)) => Generatable (Sum (f ': fs)) where
   gen =  gen +:: gen
