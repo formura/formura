@@ -1,4 +1,9 @@
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, PackageImports, RankNTypes, TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE PackageImports    #-}
+{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE ViewPatterns      #-}
 module Formura.Interpreter.Eval where
 
 import           Control.Applicative
@@ -8,16 +13,15 @@ import qualified Data.Map as M
 import qualified Data.Vector as V
 import           Text.Trifecta (failed, raiseErr)
 
-import           Formura.Interpreter.Value
-import           Formura.Compiler
-import           Formura.Language.Combinator
-import           Formura.Syntax
+import Formura.Compiler
+import Formura.Interpreter.Value
+import Formura.Language.Combinator
+import Formura.Syntax
 
 
 type Binding = M.Map IdentName TypedValue
 
-data Environment =
-  Environment
+data Environment = Environment
   { _envDimension :: Int
   , _envExtent :: [Int]
   , _envCS :: CompilerSyntacticState
@@ -26,7 +30,7 @@ data Environment =
 makeLenses ''Environment
 
 defaultEnvironment :: Environment
-defaultEnvironment = Environment 0 [] defaultCompilerSyntacticState{ _compilerStage = "interpretation" }
+defaultEnvironment = Environment 0 [] defaultCompilerSyntacticState { _compilerStage = "interpretation" }
 
 instance HasCompilerSyntacticState Environment where
   compilerSyntacticState = envCS
@@ -71,12 +75,15 @@ instance Evalable (OperatorF TypedValue) where
 
 evalUniop :: (forall a. Num a => a -> a) -> TypedValue -> IM TypedValue
 evalUniop f (ElemValue r, t) = return (ElemValue (f r), t)
+evalUniop _ _ = error "no match(Formura.Interpreter.Eval.evalUniop)"
 
 evalBinop :: (forall a. Fractional a => a -> a -> a) -> TypedValue -> TypedValue -> IM TypedValue
 evalBinop f (ElemValue x, tx ) (ElemValue y, _) = return (ElemValue (f x y), tx)
+evalBinop _ _ _ = error "no match(Formura.Interpreter.Eval.evalBinop)"
 
 instance Evalable (TupleF TypedValue) where
   eval (Tuple xts) = return (Tuple $ map fst xts, Tuple $ map snd xts)
+  eval _ = error "no match(Formura.Interpreter.Eval.eval)"
 
 instance Evalable (GridF x) where
   eval _ = raiseErr $ failed "eval of grid unimplemented."
@@ -94,8 +101,7 @@ voidEval :: a -> IM TypedValue
 voidEval _ = raiseErr $ failed "eval of void unimplemented."
 
 instance Evalable RExpr where
-  eval = mfold2 (eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: voidEval
-                  :: RExprF TypedValue -> IM TypedValue)
+  eval = mfold2 (eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: eval +:: voidEval :: RExprF TypedValue -> IM TypedValue)
 
 
 ret :: Iso' [Int] Int

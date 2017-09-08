@@ -1,37 +1,28 @@
-{-# LANGUAGE ImplicitParams, TemplateHaskell #-}
+{-# LANGUAGE ImplicitParams  #-}
+{-# LANGUAGE TemplateHaskell #-}
 
-import Control.Lens
+import           Control.Lens
 import qualified Data.Map as M
 import           Data.Maybe
-import Data.SBV
-import Test.Framework (defaultMain, testGroup)
-import Test.Framework.Providers.QuickCheck2 (testProperty)
-import Test.Framework.Providers.HUnit (testCase)
-import Test.Framework.Providers.API (Test)
-import Test.QuickCheck hiding ((==>))
-import Test.HUnit.Lang
+import           Data.SBV
+import           Test.Framework (defaultMain, testGroup)
+import           Test.Framework.Providers.API (Test)
+import           Test.Framework.Providers.HUnit (testCase)
+import           Test.Framework.Providers.QuickCheck2 (testProperty)
+import           Test.HUnit.Lang
 
 import Formura.Vec
 
 testProof :: Provable a => String -> a -> Test
 testProof msg thm = testCase msg $ do
   result <- prove thm
-  if (not $ modelExists result)
+  if not $ modelExists result
     then return()
     else assertFailure $ show result
 
-testDisproof :: Provable a => String -> a -> Test
-testDisproof msg thm = testCase msg $ do
-  result <- prove thm
-  if (not $ modelExists result)
-    then assertFailure $ show result
-    else return ()
-
-
-
-
+dimension :: Int
 dimension = 3
-nS = 1
+
 type SInt = SInt32
 
 type Pt = Vec SInt
@@ -39,8 +30,11 @@ type Pt = Vec SInt
 type Body = Pt -> SBool
 
 
-newtype RegionID = Region (Vec Int) deriving (Eq, Ord, Show)
-data FacetID  = Facet String (Vec Int) deriving (Eq, Ord, Show)
+newtype RegionID = Region (Vec Int)
+  deriving (Eq, Ord, Show)
+
+data FacetID  = Facet String (Vec Int)
+  deriving (Eq, Ord, Show)
 
 facet :: String -> [Int] -> FacetID
 facet d xs = Facet d (Vec xs)
@@ -104,6 +98,7 @@ data Plan = Plan
   , _initialFs :: [FacetID]
   , _finalFs :: [FacetID]
   }
+
 makeLenses ''Plan
 
 class HasEmbody a where
@@ -116,7 +111,7 @@ instance HasEmbody FacetID where
   embody f = fromMaybe (error $ "facetID not found:" ++ show f) $ M.lookup f $ ?plan ^. facets
 
 
-
+thePlan :: Plan
 thePlan = Plan{}
           & initialFs .~ [facet "T+" [0,0,0,0]]
           & finalFs   .~ [facet "T+" [4,0,0,0]]
@@ -125,20 +120,14 @@ thePlan = Plan{}
            (facet "T+" [4,0,0,0], orthotope [(4,5),(0,48),(0,48),(0,48)])]
 
 
-
-
-
 myBody :: Body
 myBody = orthotope [(0,100), (1,23), (4,56), (7,89)]
-
-myBody4 :: Body
-myBody4= orthotope [(4,104), (1,23), (4,56), (7,89)]
 
 itsHalo :: Body
 itsHalo = orthotope [(-1,99), (0,24), (3,57), (6,90)]
 
 
-
+tests :: [Test]
 tests = let ?plan = thePlan in  [ testGroup " The Plan "
   [ testProperty "has same numbers of initial and final facets" $
     length (thePlan ^. initialFs) == length (thePlan ^. finalFs)

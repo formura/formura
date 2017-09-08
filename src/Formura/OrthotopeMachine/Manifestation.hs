@@ -8,7 +8,16 @@ Stability   : experimental
 A module for manifestation of the Orthotope Machine: that is, an operation that removes all the delayed nodes, and replace all shift instructions with cursored-load at manifest variables.
 -}
 
-{-# LANGUAGE ConstraintKinds,DataKinds, DeriveFunctor, DeriveFoldable, DeriveTraversable, FlexibleInstances, ImplicitParams, PatternSynonyms,TemplateHaskell, TypeSynonymInstances, ViewPatterns #-}
+{-# LANGUAGE ConstraintKinds      #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE DeriveFoldable       #-}
+{-# LANGUAGE DeriveFunctor        #-}
+{-# LANGUAGE DeriveTraversable    #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE ImplicitParams       #-}
+{-# LANGUAGE PatternSynonyms      #-}
+{-# LANGUAGE TemplateHaskell      #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module Formura.OrthotopeMachine.Manifestation where
 
@@ -16,9 +25,9 @@ import           Control.Applicative
 import           Control.Lens hiding (op)
 import           Control.Monad
 import           Control.Monad.IO.Class
+import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Monoid
-import qualified Data.Map as M
 import qualified Data.Set as S
 import           Text.Trifecta (failed, raiseErr)
 
@@ -26,8 +35,8 @@ import           Text.Trifecta (failed, raiseErr)
 import qualified Formura.Annotation as A
 import           Formura.Annotation.Boundary
 import           Formura.Annotation.Representation
-import           Formura.Compiler
 import           Formura.CommandLineOption
+import           Formura.Compiler
 import           Formura.GlobalEnvironment
 import           Formura.NumericalConfig
 import           Formura.OrthotopeMachine.Graph
@@ -41,6 +50,7 @@ data TranState = TranState
   , _theMMInstruction :: MMInstruction
   , _nodeIDMap :: M.Map (Vec Int, OMNodeID) MMNodeID
   }
+
 makeClassy ''TranState
 
 instance HasCompilerSyntacticState TranState where
@@ -55,6 +65,7 @@ defaultTranState = TranState
   , _theGraph = M.empty
   , _theMMInstruction = M.empty
   , _nodeIDMap = M.empty
+  , _isManifestNode = error "_isManifestNode is unset"
   }
 
 type TranM = CompilerMonad GlobalEnvironment () TranState
@@ -105,10 +116,9 @@ insertMM c i inst = do
 rhsCodeAt :: WithNBUSpine => Vec Int -> OMNodeID -> TranM MMNodeID
 rhsCodeAt cursor nid = do
   isM <- use isManifestNode
-  case isM nid of
-     True  -> do
-       insertMM cursor nid (LoadCursor cursor nid)
-     False -> rhsDelayedCodeAt cursor nid
+  if isM nid
+    then insertMM cursor nid (LoadCursor cursor nid)
+    else rhsDelayedCodeAt cursor nid
 
 -- | generate code that calculates the RHS of current (cursor,nid)
 rhsDelayedCodeAt :: WithNBUSpine => Vec Int -> OMNodeID -> TranM MMNodeID
@@ -205,16 +215,17 @@ manifestation omprog = do
     { _omGlobalEnvironment = omprog ^. omGlobalEnvironment
     , _omStateSignature    = omprog ^. omStateSignature
     , _omInitGraph         = ig2
-    , _omStepGraph         = sg2}
+    , _omStepGraph         = sg2
+    }
 
 
 -- WARNING: The Boundary set here is never used!!!
 boundaryAnalysis :: Vec Int -> MMGraph -> MMGraph
 boundaryAnalysis fixer gr =
   flip M.mapWithKey gr $
-  \ k nd -> case M.lookup k bgr of
-  Just b ->  nd & A.annotation %~ A.set (fix $ b <> Boundary (0,0))
-  Nothing -> nd
+    \k nd -> case M.lookup k bgr of
+      Just b ->  nd & A.annotation %~ A.set (fix $ b <> Boundary (0,0))
+      Nothing -> nd
   where
     fix :: Boundary -> Boundary
     fix (Boundary (lo,hi)) = error $ show (lo,hi)--Boundary (lo, hi-fixer)
@@ -226,7 +237,6 @@ boundaryAnalysis fixer gr =
     knb :: OMNodeID -> MMNode -> Boundary
     knb _ nd = mconcat [ listBounds $ microNode ^. nodeInst |
       microNode <- M.elems $ nd ^. nodeInst]
-
 
     listBounds :: MMInstF MMNodeID -> Boundary
     listBounds (LoadCursorStatic v _) = Boundary (-v,-v)

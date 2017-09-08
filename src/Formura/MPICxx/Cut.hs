@@ -1,4 +1,13 @@
-{-# LANGUAGE DeriveDataTypeable, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, ImplicitParams, LambdaCase, MultiParamTypeClasses, MultiWayIf, TemplateHaskell, TypeSynonymInstances #-}
+{-# LANGUAGE DeriveDataTypeable         #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImplicitParams             #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE MultiWayIf                 #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
 
 {-
 
@@ -20,47 +29,57 @@ import           Algebra.Lattice.Levitated
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Data.Bits(xor)
-import           Data.List (sort, groupBy, sortBy)
+import           Data.Bits (xor)
 import           Data.Data
 import           Data.Foldable
 import           Data.Function (on)
+import           Data.List (groupBy, sort, sortBy)
 import qualified Data.Map as M
+import           Data.Maybe
 import qualified Data.Sequence as Q
 import qualified Data.Set as S
-import           Data.Maybe
 import           Text.Trifecta (failed, raiseErr)
 
 import qualified Formura.Annotation as A
 import           Formura.Annotation.Boundary
 import           Formura.CommandLineOption
-import           Formura.Syntax(IdentName)
-import           Formura.Vec
+import           Formura.Compiler
 import           Formura.Geometry
 import           Formura.GlobalEnvironment
-import           Formura.OrthotopeMachine.Graph
-import           Formura.NumericalConfig
-import           Formura.Compiler
 import qualified Formura.MPICxx.Language as C
+import           Formura.NumericalConfig
+import           Formura.OrthotopeMachine.Graph
+import           Formura.Syntax (IdentName)
+import           Formura.Vec
 
 
-newtype MPIRank = MPIRank (Vec Int) deriving (Eq, Ord, Show, Read, Num, Data)
-data IRank = IRank IRankComparator (Vec Int) deriving (Eq, Show, Read, Data)
-data IRankComparator = IRankCompareStraight | IRankCompareReverse deriving (Eq, Show, Read, Data)
+newtype MPIRank = MPIRank (Vec Int)
+  deriving (Eq, Ord, Show, Read, Num, Data)
+
+data IRank = IRank IRankComparator (Vec Int)
+  deriving (Eq, Show, Read, Data)
+
+data IRankComparator = IRankCompareStraight
+                     | IRankCompareReverse
+  deriving (Eq, Show, Read, Data)
 
 instance Ord IRank where
-  (IRank c (Vec xs)) `compare` (IRank _ (Vec ys)) =
-    case c of IRankCompareStraight -> xs `compare` ys
-              IRankCompareReverse -> reverse xs `compare` reverse ys
+  (IRank c (Vec xs)) `compare` (IRank _ (Vec ys)) = case c of
+    IRankCompareStraight -> xs `compare` ys
+    IRankCompareReverse -> reverse xs `compare` reverse ys
   compare _ _ = error "Comparison between IRank (PureVec _) is undefined"
 
 data ResourceT a b = ResourceStatic IdentName a | ResourceOMNode OMNodeID b
-                   deriving (Eq, Ord, Show, Read, Typeable, Data)
+  deriving (Eq, Ord, Show, Read, Typeable, Data)
+
 type Resource = ResourceT () ()
 type ConcreteResource = ResourceT (MPIRank, Box) (MPIRank, IRank, Box)
 
-data RidgeID = RidgeID { _ridgeDeltaMPI :: MPIRank, _ridgeDelta :: ResourceT () (IRank, IRank)}
-                   deriving (Eq, Ord, Show, Read, Typeable, Data)
+data RidgeID = RidgeID
+  { _ridgeDeltaMPI :: MPIRank
+  , _ridgeDelta :: ResourceT () (IRank, IRank)
+  } deriving (Eq, Ord, Show, Read, Typeable, Data)
+
 makeLenses ''RidgeID
 
 doesRidgeNeedMPI :: RidgeID -> Bool
@@ -68,26 +87,38 @@ doesRidgeNeedMPI r = r ^.ridgeDeltaMPI /= MPIRank 0
 
 type Ridge = (RidgeID, Box)
 
-data FacetID = FacetID { _facetDeltaMPI :: MPIRank, _facetIRSrc :: IRank, _facetIRDest :: IRank}
-                   deriving (Eq, Ord, Show, Read, Typeable, Data)
+data FacetID = FacetID
+  { _facetDeltaMPI :: MPIRank
+  , _facetIRSrc :: IRank
+  , _facetIRDest :: IRank
+  } deriving (Eq, Ord, Show, Read, Typeable, Data)
+
 makeLenses ''FacetID
 
-data DistributedInst
-  = CommunicationWait FacetID                      -- receive a facet via MPI
-  | Unstage RidgeID                                -- copy from ridge to slice
-  | Computation (IRank, OMNodeID) ArrayResourceKey -- compute a region slice and store them into the resource
-  | FreeResource ArrayResourceKey                  -- mark the end of use for given resource
-  | Stage RidgeID                                  -- copy from slice to ridge
-  | CommunicationSendRecv FacetID                  -- send a facet via MPI
-                   deriving (Eq, Ord, Show, Read, Typeable, Data)
+data DistributedInst = CommunicationWait FacetID
+                     -- ^receive a facet via MPI
+                     | Unstage RidgeID
+                     -- ^copy from ridge to slice
+                     | Computation (IRank, OMNodeID) ArrayResourceKey
+                     -- ^compute a region slice and store them into the resource
+                     | FreeResource ArrayResourceKey
+                     -- ^mark the end of use for given resource
+                     | Stage RidgeID
+                     -- ^copy from slice to ridge
+                     | CommunicationSendRecv FacetID
+                     -- ^send a facet via MPI
+  deriving (Eq, Ord, Show, Read, Typeable, Data)
 
 type ArrayResourceKey = ResourceT () IRank
+
 newtype ResourceSharingID = ResourceSharingID {fromResourceSharingID :: Int}
-                          deriving (Eq, Ord, Read, Data, Num, Enum)
-instance Show ResourceSharingID where show = show . fromResourceSharingID
+  deriving (Eq, Ord, Read, Data, Num, Enum)
+
+instance Show ResourceSharingID where
+  show = show . fromResourceSharingID
 
 data SendOrRecv = Send | Recv | SendRecv
-                deriving (Eq, Ord, Show, Read, Data, Enum)
+  deriving (Eq, Ord, Show, Read, Data, Enum)
 
 data MPIPlan = MPIPlan
   { _planArrayAlloc :: M.Map ArrayResourceKey Box
@@ -105,22 +136,25 @@ data MPIPlan = MPIPlan
   , _planFacetMPITag :: M.Map FacetID Int
   , _planMPIRequestNames :: M.Map FacetID C.Src
   }
+
 makeClassy ''MPIPlan
 
 
 data PlanRead = PlanRead
   { _prNumericalConfig :: NumericalConfig
   , _prMMProgram :: MMProgram
-   }
+  }
+
 makeClassy ''PlanRead
 
 instance HasMachineProgram PlanRead MMInstruction OMNodeType where
   machineProgram = prMMProgram
+
 instance HasGlobalEnvironment PlanRead where
   globalEnvironment = omGlobalEnvironment -- via HasMachineProgram
+
 instance HasNumericalConfig PlanRead where
   numericalConfig = prNumericalConfig
-
 
 
 data PlanState = PlanState
@@ -130,6 +164,7 @@ data PlanState = PlanState
   , _psResourceSharing :: M.Map ArrayResourceKey ResourceSharingID
   , _psFreeResourceSharingID :: [ResourceSharingID]
   }
+
 makeClassy ''PlanState
 
 instance HasCompilerSyntacticState PlanState where
@@ -140,20 +175,17 @@ type PlanM = CompilerMonad PlanRead () PlanState
 makePlan :: WithCommandLineOption => NumericalConfig -> MMProgram -> IO MPIPlan
 makePlan nc prog0 = do
   let pr = PlanRead
-           { _prNumericalConfig = nc
-           , _prMMProgram = prunedProg
-           }
+             { _prNumericalConfig = nc
+             , _prMMProgram = prunedProg
+             }
       ps = PlanState
-           { _psSyntacticState = defaultCompilerSyntacticState {_compilerStage = "MPI Planning"}
-           , _psDistributedProgramQ = Q.empty
-           , _psAlreadyIssuedInst = S.empty
-           , _psResourceSharing = M.empty
-           , _psFreeResourceSharingID = [0..]
-           }
-
-      prunedProg = prog0
-           & omStepGraph %~ pruneMMGraph
-
+             { _psSyntacticState = defaultCompilerSyntacticState {_compilerStage = "MPI Planning"}
+             , _psDistributedProgramQ = Q.empty
+             , _psAlreadyIssuedInst = S.empty
+             , _psResourceSharing = M.empty
+             , _psFreeResourceSharingID = [0..]
+             }
+      prunedProg = prog0 & omStepGraph %~ pruneMMGraph
   (ret, _, _) <- runCompilerRight cut pr ps
   return ret
 
@@ -217,10 +249,6 @@ evalPartition w = case foldMap (maybeToList . touchdown) w of
   _   -> error $ "malformed wall: " ++ show w
 
 
-
-
-
-
 cut :: WithCommandLineOption => PlanM MPIPlan
 cut = do
   dim <- view dimension
@@ -258,7 +286,7 @@ cut = do
 
   -- assign the same wall for all the Static nodes
   let wallMap2 = flip M.mapWithKey wallMap $ \nid0 wall0 ->
-        case head $ mmInstTails $ (fromJust $ M.lookup nid0 stepGraph) ^. nodeInst of
+        case head $ mmInstTails $ fromJust (M.lookup nid0 stepGraph) ^. nodeInst of
           Store _ _ -> staticWallConsensus
           _ -> wall0
 
@@ -291,15 +319,15 @@ cut = do
         (if inverted0 then reverse else id) $
         sort $
         map (IRank iRankComparator) $
-        sequence $
-        fmap (\partitions0 -> [0..length partitions0-2]) walls0
+        traverse (\partitions0 -> [0..length partitions0-2]) walls0
 
       iRankComparator
         | "irank-order-f" `elem` ncOpts = IRankCompareStraight
         | otherwise                     = IRankCompareReverse
 
       boxAt :: IRank -> Vec [Int] -> Box
-      boxAt (IRank _ vi) vw = Orthotope (liftVec2 (\i xs-> xs!!i) vi vw) (liftVec2 (\i xs-> xs!!(i+1)) vi vw)
+      boxAt (IRank _ vi) vw = Orthotope (liftVec2 (\i xs-> xs!!i) vi vw)
+                                        (liftVec2 (\i xs-> xs!!(i+1)) vi vw)
 
       iRankMap :: M.Map OMNodeID (M.Map IRank Box)
       iRankMap = flip fmap wallEvolution $ \vi -> M.fromList
@@ -331,11 +359,11 @@ cut = do
       putStrLn $ "    " ++ show (boxAssignment mpiRankOrigin ir nid)
 -}
   let supportMap :: M.Map (IRank, OMNodeID) (M.Map Resource Box)
-      supportMap = M.fromList [((ir, nid), go ir nid (fromJust $ M.lookup nid stepGraph))
+      supportMap = M.fromList [((ir, nid), go2 ir nid (fromJust $ M.lookup nid stepGraph))
                               | ir <- iRanks0, nid <- M.keys stepGraph]
 
-      go :: IRank -> OMNodeID -> MMNode -> M.Map Resource Box
-      go ir nid mmNode = let
+      go2 :: IRank -> OMNodeID -> MMNode -> M.Map Resource Box
+      go2 ir nid mmNode = let
           mmInst :: MMInstruction
           mmInst = mmNode ^. nodeInst
           microInsts :: [MMInstF MMNodeID]
@@ -390,22 +418,22 @@ cut = do
 
 
   let ridgeAndBoxRequest :: M.Map (IRank, OMNodeID) [Ridge]
-      ridgeAndBoxRequest = M.mapWithKey go supportMap
+      ridgeAndBoxRequest = M.mapWithKey go3 supportMap
 
       ridgeRequest :: M.Map (IRank, OMNodeID) [RidgeID]
       ridgeRequest = M.map (map fst) ridgeAndBoxRequest
 
       ridgeFirstNeededAt :: M.Map RidgeID IRank
-      ridgeFirstNeededAt = M.unionsWith (\a _ -> a)
+      ridgeFirstNeededAt = M.unionsWith const
         [ M.singleton rid ir
         | ir <- iRanks0
         , nid <- M.keys stepGraph
-        , rid <- maybe [] id $ M.lookup (ir, nid) ridgeRequest
+        , rid <- fromMaybe [] $ M.lookup (ir, nid) ridgeRequest
         ]
 
 
-      go :: (IRank, OMNodeID) -> M.Map Resource Box -> [Ridge]
-      go (ir, _) rbmap =
+      go3 :: (IRank, OMNodeID) -> M.Map Resource Box -> [Ridge]
+      go3 (ir, _) rbmap =
         [ mkRidge ir crsc
         | (rsc,b0) <- M.toList rbmap
         , crsc <- locateSources ir (rsc,b0)
@@ -419,7 +447,7 @@ cut = do
       allRidges = M.unionsWith (|||) $ map (uncurry M.singleton) $ concat $  M.elems ridgeAndBoxRequest
 
   let ridgeProvide :: M.Map (ResourceT () IRank) [RidgeID]
-      ridgeProvide = foldr (M.unionWith (++)) M.empty $ map mkProvide $ M.keys allRidges
+      ridgeProvide = foldr (M.unionWith (++) . mkProvide) M.empty $ M.keys allRidges
 
       mkProvide :: RidgeID -> M.Map (ResourceT () IRank) [RidgeID]
       mkProvide ridge0@(RidgeID _ drsc) = case drsc of
@@ -460,9 +488,9 @@ cut = do
 
 
   forM_ iRanks0 $ \ir -> do
-    sequence [ insert $ CommunicationWait f
-             | f <- M.keys allFacets
-             , f ^. facetIRDest == ir]
+    sequence_ [ insert $ CommunicationWait f
+              | f <- M.keys allFacets
+              , f ^. facetIRDest == ir]
     forM_ (M.keys stepGraph) $ \nid -> do
       let inRidges  = fromMaybe [] $ M.lookup (ir,nid) ridgeRequest
           outRidges = fromMaybe [] $ M.lookup (ResourceOMNode nid ir) ridgeProvide
@@ -483,7 +511,6 @@ cut = do
     sequence [ insert $ CommunicationSendRecv f
              | f <- M.keys allFacets
              , f ^. facetIRSrc == ir]
-
 
 
 
@@ -559,18 +586,16 @@ cut = do
 
     putStrLn "#### Ridge List ####"
     forM_ (M.toList allRidges) $ \(rid, box) -> do
-      putStrLn $ show rid
+      print rid
       putStrLn $ "  " ++ show box
 
     putStrLn "#### Facet List ####"
     forM_ (M.toList allFacets) $ \(f,rs) -> do
-      putStrLn $ show f
+      print f
       putStrLn $ "  " ++ show rs
 
     putStrLn "#### Program ####"
     mapM_ print dProg1
-
-
 
   return MPIPlan
     { _planArrayAlloc = allAllocs

@@ -1,4 +1,10 @@
-{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable, FlexibleContexts, ScopedTypeVariables, TypeFamilies, TypeOperators #-}
+{-# LANGUAGE DeriveFoldable      #-}
+{-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE DeriveTraversable   #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE TypeOperators       #-}
 
 module Formura.Language.TExpr where
 
@@ -14,14 +20,16 @@ data TExpr a = Atom a
              deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
 instance Applicative TExpr where
-  pure x = Atom x
-  (<*>) = go where
-    go (Atom f) (Atom x) = Atom (f x)
-    go (Tree afs) ax@(Atom _) = Tree [ af <*> ax | af <- afs]
-    go af@(Atom _) (Tree axs) = Tree [ af <*> ax | ax <- axs]
-    go (Tree afs) (Tree axs) | length afs == length axs = Tree $ zipWith (<*>) afs axs
-                             | otherwise                = Mismatch
-    go _ _ = Mismatch
+  pure = Atom
+  (<*>) = go
+    where
+      go (Atom f) (Atom x) = Atom (f x)
+      go (Tree afs) ax@(Atom _) = Tree [ af <*> ax | af <- afs]
+      go af@(Atom _) (Tree axs) = Tree [ af <*> ax | ax <- axs]
+      go (Tree afs) (Tree axs) | length afs == length axs = Tree $ zipWith (<*>) afs axs
+                               | otherwise                = Mismatch
+      go _ _ = Mismatch
+
 
 -- | Convert between 'TExpr' and 'Lang'uage with 'Tuple'
 tExpr :: forall fs. (TupleF ∈ fs) => Prism' (TExpr (Lang fs)) (Lang fs)

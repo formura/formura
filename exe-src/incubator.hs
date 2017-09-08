@@ -4,21 +4,14 @@
 module Main where
 
 import           Cases (snakify)
-import           Control.Concurrent
-import qualified Control.Exception as C
 import           Control.Lens
 import           Control.Monad.State
 import           Data.Aeson.TH
-import qualified Data.ByteString as BS
 import           Data.Foldable
-import qualified Data.HashMap.Strict as HM
-import           Data.List (isPrefixOf, sort, intercalate, isInfixOf, isSuffixOf)
-import qualified Data.Map as M
+import           Data.List (sort, intercalate, isInfixOf, isSuffixOf)
 import           Data.Maybe
 import qualified Data.Set as S
 import           Data.Time
-import qualified Data.Yaml as Y
-import qualified Data.Yaml.Pretty as Y
 import qualified Data.Text as T
 import qualified Data.Text.Lens as T (packed)
 import           System.Directory
@@ -29,7 +22,6 @@ import           System.FilePath.Lens
 import           System.IO
 import           System.IO.Temp
 import           System.IO.Unsafe
-import           System.Process
 import           System.Random.Shuffle(shuffleM)
 import           Text.Printf
 import           Formura.NumericalConfig
@@ -74,6 +66,7 @@ $(deriveJSON (let toSnake = T.packed %~ snakify in
 qbConfigFilePath :: FilePath
 qbConfigFilePath = ".qb/config"
 
+qbDefaultConfig :: QBConfig
 qbDefaultConfig = QBConfig
   { _qbHostName = "K"
   , _qbWorkDir = ".qb/"
@@ -155,9 +148,9 @@ data IndExp = IndExp Individual Experiment
             deriving (Eq, Ord, Show, Read)
 
 instance HasIndividual IndExp where
-  individual f (IndExp i x) = (\i -> IndExp i x) <$> f i
+  individual f (IndExp i x) = (\j -> IndExp j x) <$> f i
 instance HasExperiment IndExp where
-  experiment f (IndExp i x) = (\x -> IndExp i x) <$> f x
+  experiment f (IndExp i x) = (\y -> IndExp i y) <$> f x
 instance HasNumericalConfig IndExp where
   numericalConfig = individual . idvNumericalConfig
 
@@ -232,8 +225,7 @@ getCodegen gitKey = do
 
 codegen :: WithQBConfig => IndExp -> IO IndExp
 codegen it = do
-  let labNote = ?qbc ^. qbLabNotePath
-      codeDir = it ^. xpLocalWorkDir </> "src"
+  let codeDir = it ^. xpLocalWorkDir </> "src"
   cmd $ "mkdir -p " ++ codeDir
   codegenFn <- getCodegen $ it ^. idvFormuraVersion
   withCurrentDirectory codeDir $ do
@@ -336,8 +328,7 @@ benchmark it = do
   argv <- getArgs
   let csvMode = "--csv" `elem` argv -- Generate csv for Fujitsu XLS
 
-  let labNote = ?qbc ^. qbLabNotePath
-      exeDir = it ^. xpLocalWorkDir
+  let exeDir = it ^. xpLocalWorkDir
       mpiSize :: Int
       mpiSize = product $ it ^. ncMPIGridShape
 
@@ -346,7 +337,6 @@ benchmark it = do
   let
       localLN  = ?qbc ^. qbLabNotePath
       remoteLN = ?qbc ^. qbRemoteLabNotePath
-      host = ?qbc ^. qbHostName
 
 
   let remotedir = exeDir & T.packed %~ T.replace (T.pack localLN) (T.pack remoteLN)
@@ -440,7 +430,6 @@ visualize it = do
       exeDir = it ^. xpLocalWorkDir
       localLN  = ?qbc ^. qbLabNotePath
       remoteLN = ?qbc ^. qbRemoteLabNotePath
-      host = ?qbc ^. qbHostName
   let remotedir = exeDir & T.packed %~ T.replace (T.pack localLN) (T.pack remoteLN)
   withCurrentDirectory exeDir $ do
     writeFile "postprocess.sh" $ unlines
@@ -512,13 +501,13 @@ normalize nc
   | not (sane nc) = []
   | otherwise     = [nc]
   where
-    sane nc = and
-      [ nc ^. ncTemporalBlockingInterval > 0
-      , all (>0) $ nc ^. ncIntraNodeShape
-      , all (>0) $ nc ^. ncMPIGridShape
-      , nc ^. ncMonitorInterval > 0
-      , and [ (head $ nc ^. ncInitialWalls . ix a) >  nc ^. ncTemporalBlockingInterval*2  | (a,i) <- ncIxs ]
-      , and [ ws == sort ws | (a,_) <- ncIxs, let ws = nc ^. ncInitialWalls . ix a]
+    sane nc' = and
+      [ nc' ^. ncTemporalBlockingInterval > 0
+      , all (>0) $ nc' ^. ncIntraNodeShape
+      , all (>0) $ nc' ^. ncMPIGridShape
+      , nc' ^. ncMonitorInterval > 0
+      , and [ (head $ nc' ^. ncInitialWalls . ix a) >  nc' ^. ncTemporalBlockingInterval*2  | (a,_) <- ncIxs ]
+      , and [ ws == sort ws | (a,_) <- ncIxs, let ws = nc' ^. ncInitialWalls . ix a]
       ]
 ncPerturbers :: [NumericalConfig -> NumericalConfig]
 ncPerturbers = [ ncIntraNodeShape . ix a %~ f | a <- [0..2], f <- intPerturbers]
@@ -576,14 +565,14 @@ mainServer = do
 proceed :: WithQBConfig => IndExp -> IO ()
 proceed it = do
   argv <- getArgs
-  let whenSlack lmt perform it = do
+  let whenSlack lmt perform it' = do
         kstat <- readCmd "ssh K kstat"
         let crowded = length (lines kstat) - 5 > lmt
         case crowded &&  (not $ "--unnice" `elem` argv) of
           True -> do
             putStrLn "CROWDED!!"
-            return it
-          False -> perform it
+            return it'
+          False -> perform it'
 
   putStrLn $ "## "++ it ^. xpExperimentFilePath
   t_begin <- getCurrentTime
@@ -599,7 +588,7 @@ proceed it = do
         Failed _ -> waits waitlist it -- Double check before choosing to fail.
         _ -> return ret
     Done -> return it
-    Failed act -> case it ^. xpFailureCounter > 1 of
+    Failed _ -> case it ^. xpFailureCounter > 1 of
       True -> return it
       _ ->  return $ it & xpAction .~ Codegen
         & xpFailureCounter %~ (+1)

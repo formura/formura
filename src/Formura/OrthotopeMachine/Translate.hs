@@ -1,4 +1,15 @@
-{-# LANGUAGE DataKinds, DeriveFunctor, DeriveFoldable, DeriveTraversable, FlexibleContexts, FlexibleInstances, GADTs, PackageImports, PatternSynonyms, ScopedTypeVariables, TemplateHaskell, TypeOperators, ViewPatterns #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE DeriveFoldable      #-}
+{-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE DeriveTraversable   #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE FlexibleInstances   #-}
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE PackageImports      #-}
+{-# LANGUAGE PatternSynonyms     #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TypeOperators       #-}
 module Formura.OrthotopeMachine.Translate where
 
 import           Algebra.Lattice
@@ -8,20 +19,20 @@ import           Control.Monad
 import "mtl"     Control.Monad.Reader hiding (fix)
 import           Data.Foldable
 import qualified Data.Map as M
-import qualified Data.Set as S
 import           Data.Ratio
+import qualified Data.Set as S
 import           Text.Trifecta (failed, raiseErr)
 
-import           Formura.Language.Combinator
-import           Formura.Language.TExpr
 import qualified Formura.Annotation as A
 import           Formura.Annotation.Representation
 import           Formura.Compiler
 import           Formura.GlobalEnvironment
+import           Formura.Language.Combinator
+import           Formura.Language.TExpr
+import           Formura.OrthotopeMachine.Graph
 import           Formura.Syntax
 import           Formura.Type
 import           Formura.Vec
-import           Formura.OrthotopeMachine.Graph
 
 
 type Binding = M.Map IdentName ValueExpr
@@ -38,6 +49,7 @@ data CodegenState = CodegenState
   , _codegenGlobalEnvironment :: GlobalEnvironment
   , _theGraph :: OMGraph
   }
+
 makeClassy ''CodegenState
 
 instance HasGlobalEnvironment CodegenState where
@@ -48,7 +60,7 @@ instance HasCompilerSyntacticState CodegenState where
 
 defaultCodegenState :: CodegenState
 defaultCodegenState = CodegenState
-  { _codegenSyntacticState = defaultCompilerSyntacticState{ _compilerStage = "codegen"}
+  { _codegenSyntacticState = defaultCompilerSyntacticState {_compilerStage = "codegen"}
   , _theGraph = M.empty
   , _codegenGlobalEnvironment = defaultGlobalEnvironment
   }
@@ -107,8 +119,8 @@ insert inst typ = do
   theGraph %= M.insert n0 (Node inst typ a)
   mmeta <- use compilerFocus
   case mmeta of
-       Just meta -> theGraph . ix n0 . A.annotation %= A.set meta
-       _         -> return ()
+    Just meta -> theGraph . ix n0 . A.annotation %= A.set meta
+    _         -> return ()
 
   return $ NodeValue n0 typ
 
@@ -119,6 +131,7 @@ typeOfVal (Imm _)         = ElemType "Rational"
 typeOfVal (NodeValue _ t) = subFix t
 typeOfVal (FunValue _ _)  = FunType
 typeOfVal (Tuple xs)      = Tuple $ map typeOfVal xs
+typeOfVal _ = error "no match (Formura.OrthotopeMachine.Translate.typeOfVal)"
 
 
 -- | convert a value to other value, so that the result may have the given type
@@ -131,9 +144,9 @@ castVal t1 vx = let t0 = typeOfVal vx in case (t1, t0, vx) of
   _ -> raiseErr $ failed $ "cannot convert type " ++ show t0 ++ " to " ++ show t1
 
 
-
 instance Generatable ImmF where
   gen (Imm r) = insert (Imm r) (ElemType "Rational")
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 spoonTExpr :: (TupleF ∈ fs) => TExpr (Lang fs) -> GenM (Lang fs)
 spoonTExpr x = case x ^? tExpr of
@@ -153,9 +166,11 @@ instance Generatable OperatorF where
         texpr_list_vals = sequenceA list_texpr_vals :: TExpr [ValueExpr]
     ret <- sequence $ goNaryop op <$> texpr_list_vals
     spoonTExpr ret
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 
 type MVsT = Maybe ([OMNodeID], OMNodeType)
+
 goNaryop :: IdentName -> [ValueExpr] -> GenM ValueExpr
 goNaryop op xs = do
   mvst <- foldrM foldVT Nothing xs
@@ -232,12 +247,14 @@ instance Generatable IdentF where
       Nothing ->
         raiseErr $ failed $ "undefined variable: " ++ n ++ "\n Bindings:\n" ++ show b
       Just x  -> return $ subFix x
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 
 instance Generatable TupleF where
   gen (Tuple xsGen) = do
     xs <- sequence xsGen
     return $ Tuple xs
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 instance Generatable GridF where
   gen (Grid npks gen0) = do
@@ -256,6 +273,7 @@ instance Generatable GridF where
           if intOff == 0
                   then return (val0 :. typ1)
                   else insert (Shift (negate intOff) val0) typ1
+        _ -> error "no match"
       Tuple vs -> do
         xs <- sequence [gen $ GridF npks (return v :: GenM ValueExpr) | v <- vs]
         return $ Tuple xs
@@ -271,6 +289,7 @@ instance Generatable ApplyF where
     f0 <- fgen
     a0 <- agen
     goApply f0 a0
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 evalToImm :: ValueExpr -> GenM (Maybe Rational)
 evalToImm x = do
@@ -279,6 +298,7 @@ evalToImm x = do
     Imm r -> return $ Just r
     n :. _ -> case M.lookup n g of
       Just (Node (Imm r) _ _) -> return $ Just r
+      _ -> error "no match"
     _ -> return Nothing
 
 goApply :: ValueExpr -> ValueExpr -> GenM ValueExpr
@@ -288,7 +308,6 @@ goApply (Tuple xs) (Imm r) = do
       l = length xs
   when (n < 0 || n >= l) $ raiseErr $ failed "tuple access out of bounds"
   return $ xs!!n
-
 goApply x@(Tuple _) arg0 = do
   i <- evalToImm arg0
   case i of
@@ -296,7 +315,6 @@ goApply x@(Tuple _) arg0 = do
     _ -> do
       g <- use theGraph
       raiseErr $ failed $ "tuple applied to non-constant integer: " ++ show arg0 ++ show g
-
 goApply (FunValue l r) x = do
   lrs <- matchToLhs l x
   let x2 :: Binding
@@ -311,6 +329,7 @@ instance Generatable LambdaF where
         conv b s = (M.union (lexicalScopeHolder l) $ M.map subFix b, s)
     r' <- withCompiler conv $ resolveLex $ subFix r
     return $ FunValue l r'
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 -- resolveLex :: RXExpr -> LexGenM RXExpr
 -- resolveLex r = compilerMFold resolveLexAlg r
@@ -319,8 +338,7 @@ resolveLex :: RXExpr -> LexGenM RXExpr
 resolveLex (Ident n) = do
   b <- ask
   case M.lookup n b of
-    Nothing -> raiseErr $ failed $ "undefined variable: " ++ n ++ "\nwhen resolving lexical binding."
-               ++ "\n Bindings:\n" ++ unwords (M.keys b)
+    Nothing -> raiseErr $ failed $ "undefined variable: " ++ n ++ "\nwhen resolving lexical binding." ++ "\n Bindings:\n" ++ unwords (M.keys b)
     Just x  -> return $ subFix x
 resolveLex (Lambda l r) = do
   r' <- local (M.union (lexicalScopeHolder l)) $ resolveLex $ subFix r
@@ -338,12 +356,14 @@ resolveLex (In meta fx) = do
 
 instance Generatable LetF where
   gen (Let b genX) = withBindings b genX
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 namesOfLhs :: LExpr -> TupleOfIdents
 namesOfLhs (Ident n) = Ident n
 namesOfLhs (Grid _ x) = namesOfLhs x
 namesOfLhs (Vector _ x) = namesOfLhs x
 namesOfLhs (Tuple xs) = Tuple $ map namesOfLhs xs
+namesOfLhs _ = error "no match (Formura.OrthotopeMachine.Translate.namesOfLhs)"
 
 indexNamesOfLhs :: LExpr -> Vec (Maybe IdentName)
 indexNamesOfLhs (Grid npks _) = fmap indexNameOfNPK npks
@@ -370,6 +390,7 @@ matchToIdents = go
     go (Tuple _) (Tuple _) = raiseErr $ failed "tuple length mismatch."
     go (Tuple _) _         = raiseErr $ failed "the LHS expects a tuple, but RHS is not a tuple."
     go (Ident x) y = return [(x,y)]
+    go _ _ = error "no match(Formura.OrthotopeMachine.Translate.matchToIdents)"
 
 
 matchValueExprToLhs :: LExpr -> ValueExpr -> GenM [(IdentName, ValueExpr)]
@@ -378,7 +399,6 @@ matchValueExprToLhs (Grid npk lx) vx = do
   forM ivx $ \(i,v) -> do
     v2 <- gen (GridF (negate npk) (return v))
     return (i,v2)
-
 matchValueExprToLhs lx vx = matchToLhs lx vx
 
 -- | Create a Binding so that names in the LExpr become free variables,
@@ -486,9 +506,11 @@ instance Generatable (Sum '[]) where
 
 instance Generatable NodeValueF where
   gen (NodeValue t v) = return (NodeValue t v)
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 instance Generatable FunValueF where
   gen (FunValue l r) = return (FunValue l r)
+  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 instance (Generatable f, Generatable (Sum fs)) => Generatable (Sum (f ': fs)) where
   gen =  gen +:: gen
@@ -531,8 +553,6 @@ genGlobalFunction globalBinding inputType outputPattern (Lambda l r) =  bindThem
   return $ typeExprOf returnValueExpr
   where
     bindThemAll = withBindings $ fmap (genRhs .subFix) globalBinding
-
-
 genGlobalFunction _ _ _ _ = raiseErr $ failed "Identifier specified for function generation is not of function type."
 
 lookupToplevelIdents :: Program -> IdentName -> GenM RExpr

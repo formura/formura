@@ -1,27 +1,33 @@
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, MultiParamTypeClasses, PackageImports, StandaloneDeriving, TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE PackageImports             #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TemplateHaskell            #-}
 
 module Formura.Compiler where
 
 import           Control.Applicative
 import           Control.Lens
-import           Control.Monad.Trans.Either
 import           Control.Monad.Morph
 import "mtl"     Control.Monad.RWS
+import           Control.Monad.Trans.Either
 import qualified Data.Set as S
-import           System.IO
 import           System.Exit
-import qualified Text.Trifecta as P
+import           System.IO
 import qualified Text.PrettyPrint.ANSI.Leijen as Ppr
+import qualified Text.Trifecta as P
 
 import Formura.Language.Combinator
 
 type CompilerError = Ppr.Doc
 
 -- | The state of the compiler.
-data CompilerSyntacticState =
-  CompilerSyntacticState
+data CompilerSyntacticState = CompilerSyntacticState
   { _compilerFocus :: Maybe Metadata
-  , _compilerStage :: String }
+  , _compilerStage :: String
+  }
 
 makeClassy ''CompilerSyntacticState
 
@@ -30,9 +36,9 @@ defaultCompilerSyntacticState = CompilerSyntacticState Nothing ""
 
 -- | The formura compiler monad.
 newtype CompilerMonad r w s a = CompilerMonad
-  { runCompilerMonad :: EitherT CompilerError (RWST r w s IO) a}
-              deriving (Functor, Applicative, Monad, MonadIO,
-                        MonadReader r, MonadState s, MonadWriter w)
+  { runCompilerMonad :: EitherT CompilerError (RWST r w s IO) a }
+  deriving (Functor, Applicative, Monad,
+            MonadIO, MonadReader r, MonadState s, MonadWriter w)
 
 compileErrMsg :: (HasCompilerSyntacticState s, MonadState s m) => P.Err -> m Ppr.Doc
 compileErrMsg errMsg = do
@@ -43,8 +49,7 @@ compileErrMsg errMsg = do
           | otherwise = errMsg & P.footnotes %~ (++ [Ppr.text ("when " ++ stg)])
     case foc of
       Nothing -> return $ P.explain P.emptyRendering errMsg2
-      Just (Metadata r b e) -> return $
-        P.explain (P.addSpan b e r) errMsg2
+      Just (Metadata r b e) -> return $ P.explain (P.addSpan b e r) errMsg2
 
 
 -- | Throw an error, possibly with user-friendly diagnostics of the current compiler state.
@@ -75,8 +80,9 @@ runCompilerRight m r s = do
 
 
 -- | Run compiler, changing the reader and the state.
-withCompiler :: Monoid w => (r' -> s -> (r,s)) -> CompilerMonad r w s a -> CompilerMonad r' w s a
-withCompiler f = CompilerMonad . (hoist $ withRWST f) . runCompilerMonad
+withCompiler :: Monoid w => (r' -> s -> (r,s))
+             -> CompilerMonad r w s a -> CompilerMonad r' w s a
+withCompiler f = CompilerMonad . hoist (withRWST f) . runCompilerMonad
 
 -- | Raise doc as an error
 raiseDoc :: P.Errable m => Ppr.Doc ->  m a
@@ -100,8 +106,7 @@ compilerMFoldout :: (Monoid w, Traversable f, HasCompilerSyntacticState s) =>
 compilerMFoldout k (In meta x) = do
   r1 <- traverse (compilerMFoldout k) x
   compilerFocus %= (meta <|>)
-  r2 <- k r1
-  return r2
+  k r1
 
 -- | The compiler-monad-specific pure foldout, that takes track of the syntax tree traversed.
 compilerFoldout :: (Monoid w, Traversable f, HasCompilerSyntacticState s) =>

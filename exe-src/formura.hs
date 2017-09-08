@@ -1,7 +1,6 @@
 {-# LANGUAGE ImplicitParams #-}
 module Main where
 
-
 import           Control.Lens
 import           Control.Monad
 import qualified Data.Map as M
@@ -11,18 +10,17 @@ import qualified Text.PrettyPrint.ANSI.Leijen as Ppr
 import qualified Text.Trifecta as P
 
 import qualified Formura.Annotation as A
-import           Formura.Annotation.Boundary
 import           Formura.Annotation.Representation
 import           Formura.CommandLineOption
-import           Formura.OrthotopeMachine.Graph
-import           Formura.OrthotopeMachine.Translate (genOMProgram)
-import           Formura.OrthotopeMachine.Manifestation (genMMProgram)
-import qualified Formura.Parser as P
 import           Formura.Desugar
-import           Formura.Syntax
 import           Formura.MPICxx.Language (TargetLanguage(..), targetLanguage)
 import qualified Formura.MPICxx.Translate as C
 import qualified Formura.MPIFortran.Translate as F
+import           Formura.OrthotopeMachine.Graph
+import           Formura.OrthotopeMachine.Manifestation (genMMProgram)
+import           Formura.OrthotopeMachine.Translate (genOMProgram)
+import qualified Formura.Parser as P
+import           Formura.Syntax
 
 main :: IO ()
 main = do
@@ -36,8 +34,9 @@ process :: WithCommandLineOption => FilePath -> IO ()
 process fn = do
   mprog <- P.parseFromFileEx (P.runP $ P.program <* P.eof) fn
   case mprog of
-      P.Failure doc -> Ppr.displayIO stdout $ Ppr.renderPretty 0.8 80 $ doc <> Ppr.linebreak
-      P.Success prog -> codegen prog
+    P.Failure doc -> Ppr.displayIO stdout $ Ppr.renderPretty 0.8 80 $ doc <> Ppr.linebreak
+    P.Success prog -> codegen prog
+
 
 codegen :: WithCommandLineOption => Program -> IO ()
 codegen sugarcoated_prog = do
@@ -84,6 +83,7 @@ codegen sugarcoated_prog = do
     MPICxx -> C.genCxxFiles prog mmProg
     MPIFortran -> F.genFortranFiles prog mmProg
 
+
 pprNode :: (OMNodeID, OMNode) -> IO ()
 pprNode (i,n) = do
   let r = case A.toMaybe (n ^. A.annotation) of
@@ -93,6 +93,7 @@ pprNode (i,n) = do
         Just (SourceName n1) -> n1
         _                   -> ""
   putStrLn $ unwords [r , take 8 $ varName ++ repeat ' ', show (i,n)]
+
 
 pprMMNode :: (OMNodeID, MMNode) -> IO ()
 pprMMNode (i,n) = do
