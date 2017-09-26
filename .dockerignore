@@ -7,7 +7,6 @@ test
 Dockerfile
 a.out
 attic/
-bin/
 examples-generated/
 img/
 reference/
