@@ -995,6 +995,16 @@ collaboratePlans = do
   tsCommonStaticBox .= commonStaticBox
   tsMPIPlanMap .= newPlans
 
+pprMMNode :: (OMNodeID, MMNode) -> IO ()
+pprMMNode (i,n) = do
+  let
+      varName = case A.toMaybe (n ^. A.annotation) of
+        Just (SourceName n1) -> n1
+        _                   -> ""
+      -- Just (Boundary bdy) = A.toMaybe $ n^.A.annotation
+  -- print bdy
+  -- putStrLn $ unwords [take 8 $ varName ++ repeat ' ', show (i,n),show bdy]
+  putStrLn $ unwords [take 8 $ varName ++ repeat ' ', show (i,n)]
 
 -- | The main translation logic
 tellProgram :: WithCommandLineOption => TranM ()
@@ -1270,6 +1280,7 @@ genCxxFiles formuraProg mmProg0 = do
 
     mmProgTB = temporalBlocking tbFoldingNumber mmProg0
 
+
     tranState0 = TranState
       { _tranSyntacticState = defaultCompilerSyntacticState{ _compilerStage = "C++ code generation"}
       , _tsNamingState = defaultNamingState
@@ -1284,6 +1295,7 @@ genCxxFiles formuraProg mmProg0 = do
       , _tsCommonOMNodeBox = error "_tsCommonOMNodeBox is unset"
       }
 
+  mapM_ pprMMNode $ M.toList (mmProgTB ^. omStepGraph)
 
   (_, tranState1 , cprog0)
     <- runCompilerRight tellProgram

@@ -256,8 +256,10 @@ cut = do
 
   walls0 <- initialWalls
   -- liftIO $ print (walls0 :: Walls)
-  -- let wvs = fmap (fmap evalPartition) walls0
-  -- liftIO $ print (wvs :: Vec [Int])
+
+  liftIO $ putStrLn "### wallEvolution"
+  let wvs = fmap (fmap evalPartition) walls0
+  liftIO $ print (wvs :: Vec [Int])
 
   stepGraph <- view omStepGraph
 
@@ -306,13 +308,17 @@ cut = do
   let wallEvolution :: M.Map OMNodeID (Vec [Int])
       wallEvolution = fmap (fmap (fmap evalPartition)) wallMap2
 
-  -- liftIO $ print (wallEvolution :: M.Map OMNodeID (Vec [Int]))
+  liftIO $ putStrLn "### wallEvolution"
+  liftIO $ print (wallEvolution :: M.Map OMNodeID (Vec [Int]))
 
   intraShape0 <- view ncIntraNodeShape
 
   maybeInv <- view ncWallInverted
   let inverted0 = maybeInv == Just True :: Bool
 
+
+  liftIO $ putStrLn "### inverted0"
+  liftIO $ print inverted0
 
   let iRanks0 :: [IRank]
       iRanks0 =
@@ -351,13 +357,13 @@ cut = do
       mpiBox0 :: Box
       mpiBox0 = Orthotope zeroVec intraShape0
 
-{-
+
   liftIO $ forM_ (M.keys stepGraph) $ \nid -> do
     putStrLn $ "NODE: " ++ show nid
     forM_ iRanks0 $ \ir -> do
       putStrLn $ "  IR: " ++ show ir
       putStrLn $ "    " ++ show (boxAssignment mpiRankOrigin ir nid)
--}
+
   let supportMap :: M.Map (IRank, OMNodeID) (M.Map Resource Box)
       supportMap = M.fromList [((ir, nid), go2 ir nid (fromJust $ M.lookup nid stepGraph))
                               | ir <- iRanks0, nid <- M.keys stepGraph]
@@ -377,13 +383,12 @@ cut = do
         M.singleton (ResourceOMNode nid ()) (move v b0)
       listSupport _ _ = M.empty
 
-  {-
   liftIO $ forM_ iRanks0 $ \ir -> do
     putStrLn $ "IR: " ++ show ir
     forM_ (M.keys stepGraph) $ \nid -> do
       putStrLn $ "  NODE: " ++ show nid
       putStrLn $ "    " ++ show (M.lookup (ir,nid) supportMap)
--}
+
 
   let locateSources :: IRank -> (Resource, Box) -> [ConcreteResource]
       locateSources irDest (ResourceOMNode nid (),b0) =
