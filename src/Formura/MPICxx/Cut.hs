@@ -451,6 +451,10 @@ cut = do
       allRidges :: M.Map RidgeID Box
       allRidges = M.unionsWith (|||) $ map (uncurry M.singleton) $ concat $  M.elems ridgeAndBoxRequest
 
+  liftIO $ do
+    putStrLn "#### allRidges"
+    print allRidges
+
   let ridgeProvide :: M.Map (ResourceT () IRank) [RidgeID]
       ridgeProvide = foldr (M.unionWith (++) . mkProvide) M.empty $ M.keys allRidges
 
@@ -471,6 +475,14 @@ cut = do
 
       allFacets :: M.Map FacetID [RidgeID]
       allFacets = M.unionsWith (++) [M.singleton f [r] | (r,f) <- M.toList facetAssignment]
+
+  liftIO $ do
+    putStrLn "#### ridgeProvide"
+    print ridgeProvide
+    putStrLn "#### facetAssignment"
+    print facetAssignment
+    putStrLn "#### allFacets"
+    print allFacets
 
 
   let insert :: DistributedInst -> PlanM ()
