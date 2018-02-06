@@ -5,6 +5,7 @@
 module Formura.CommandLineOption where
 
 import Control.Lens hiding (argument)
+import Data.Monoid ((<>))
 import Options.Applicative
 import System.FilePath.Lens
 

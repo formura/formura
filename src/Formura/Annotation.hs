@@ -5,6 +5,7 @@ module Formura.Annotation where
 import           Control.Lens
 import           Control.Monad
 import           Data.Dynamic
+import           Data.Typeable
 import           Data.Maybe
 import           Prelude hiding (map)
 import qualified Prelude as P (map)
