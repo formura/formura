@@ -119,7 +119,7 @@ makeGridValueF offset fun = do
   content <- mapM fun idxs
   return $ GridValueF offset $ V.fromList content
 
-accessGridF :: GridValueF x -> [Rational] -> IM x
-accessGridF g addr = do
-  let iaddr = zipWith (-) addr (g ^.gridOffset)
-  return undefined
+-- accessGridF :: GridValueF x -> [Rational] -> IM x
+-- accessGridF g addr = do
+--   let iaddr = zipWith (-) addr (g ^.gridOffset)
+--   return undefined
