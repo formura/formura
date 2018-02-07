@@ -49,6 +49,7 @@ data ElemTypeF x = ElemTypeF IdentName
 instance Show (ElemTypeF x) where
   show (ElemTypeF n) = n
 
+pattern ElemType :: Matches ElemTypeF s => IdentName -> s
 pattern ElemType x <- ((^? match) -> Just (ElemTypeF x))
   where ElemType x = match # ElemTypeF x
 
@@ -64,12 +65,14 @@ instance Show TypeModifier where
 data FunTypeF x = FunTypeF
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern FunType :: Matches FunTypeF s => s
 pattern FunType <- ((^? match) -> Just FunTypeF)
   where FunType = match # FunTypeF
 
 data TopTypeF x = TopTypeF
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern TopType :: Matches TopTypeF s => s
 pattern TopType <- ((^? match) -> Just TopTypeF)
   where TopType = match # TopTypeF
 
@@ -80,6 +83,7 @@ data IdentF x = IdentF IdentName
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
 -- | smart pattern
+pattern Ident :: Matches IdentF s => IdentName -> s
 pattern Ident xs <- ((^? match) -> Just (IdentF xs))
   where Ident xs = match # IdentF xs
 
@@ -100,6 +104,7 @@ instance Q.Arbitrary x => Q.Arbitrary (TupleF x) where
   shrink (TupleF xs) = map TupleF $ Q.shrink xs
 
 -- | smart pattern
+pattern Tuple :: Matches TupleF s => [Content TupleF s] -> s
 pattern Tuple xs <- ((^? match) -> Just (TupleF xs))
   where Tuple xs = match # TupleF xs
 
@@ -109,6 +114,7 @@ pattern Tuple xs <- ((^? match) -> Just (TupleF xs))
 data ImmF x = ImmF Rational
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern Imm :: Matches ImmF s => Rational -> s
 pattern Imm r <- ((^? match) -> Just (ImmF r))
   where Imm r = match # ImmF r
 
@@ -120,6 +126,7 @@ instance Q.Arbitrary x => Q.Arbitrary (ImmF x) where
 data ImmBoolF x = ImmBoolF Bool
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern ImmBool :: Matches ImmBoolF s => Bool -> s
 pattern ImmBool r <- ((^? match) -> Just (ImmBoolF r))
   where ImmBool r = match # ImmBoolF r
 
@@ -154,15 +161,19 @@ instance Q.Arbitrary x => Q.Arbitrary (OperatorF x) where
   shrink = Q.genericShrink
 
 -- | smart patterns
+pattern Uniop :: Matches OperatorF s => IdentName -> Content OperatorF s -> s
 pattern Uniop op a <- ((^? match) -> Just (UniopF op a))
   where Uniop op a = match # UniopF op a
 
+pattern Binop :: Matches OperatorF s => IdentName -> Content OperatorF s -> Content OperatorF s -> s
 pattern Binop op a b <- ((^? match) -> Just (BinopF op a b))
   where Binop op a b = match # BinopF op a b
 
+pattern Triop :: Matches OperatorF s => IdentName -> Content OperatorF s -> Content OperatorF s -> Content OperatorF s -> s
 pattern Triop op a b c <- ((^? match) -> Just (TriopF op a b c))
   where Triop op a b c = match # TriopF op a b c
 
+pattern Naryop ::  Matches OperatorF s => IdentName -> [Content OperatorF s] -> s
 pattern Naryop op xs <- ((^? match) -> Just (NaryopF op xs))
   where Naryop op xs = match # NaryopF op xs
 
@@ -171,6 +182,7 @@ pattern Naryop op xs <- ((^? match) -> Just (NaryopF op xs))
 data GridF x = GridF (Vec NPlusK) x
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern Grid :: Matches GridF s => Vec NPlusK -> Content GridF s -> s
 pattern Grid args x <- ((^? match) -> Just (GridF args x))
   where Grid args x = match # GridF args x
 
@@ -180,6 +192,7 @@ data GridTypeF x = GridTypeF (Vec Rational) x
 instance Show x => Show (GridTypeF x) where
   show (GridTypeF v x) = show x ++ show v
 
+pattern GridType :: Matches GridTypeF s => Vec Rational -> Content GridTypeF s -> s
 pattern GridType args x <- ((^? match) -> Just (GridTypeF args x))
   where GridType args x = match # GridTypeF args x
 
@@ -187,12 +200,14 @@ pattern GridType args x <- ((^? match) -> Just (GridTypeF args x))
 data VectorF x = VectorF IdentName x
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern Vector :: Matches VectorF s => IdentName -> Content VectorF s -> s
 pattern Vector args x <- ((^? match) -> Just (VectorF args x))
   where Vector args x = match # VectorF args x
 
 data VectorTypeF x = VectorTypeF Int x
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern VectorType :: Matches VectorTypeF s => Int -> Content VectorTypeF s -> s
 pattern VectorType args x <- ((^? match) -> Just (VectorTypeF args x))
   where VectorType args x = match # VectorTypeF args x
 
@@ -202,6 +217,7 @@ pattern VectorType args x <- ((^? match) -> Just (VectorTypeF args x))
 data ApplyF x = ApplyF x x
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern Apply :: Matches ApplyF s => Content ApplyF s -> Content ApplyF s -> s
 pattern Apply f x <- ((^? match) -> Just (ApplyF f x))
   where Apply f x = match # ApplyF f x
 
@@ -209,6 +225,7 @@ pattern Apply f x <- ((^? match) -> Just (ApplyF f x))
 data LetF x = LetF (BindingF x) x
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern Let :: Matches LetF s => BindingF (Content LetF s) -> Content LetF s -> s
 pattern Let binds x <- ((^? match) -> Just (LetF binds x))
   where Let binds x = match # LetF binds x
 
@@ -216,6 +233,7 @@ pattern Let binds x <- ((^? match) -> Just (LetF binds x))
 data LambdaF x = LambdaF LExpr RExpr
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern Lambda :: Matches LambdaF s => LExpr -> RExpr -> s
 pattern Lambda args x <- ((^? match) -> Just (LambdaF args x ))
   where Lambda args x = match # LambdaF args x
 
@@ -223,6 +241,7 @@ pattern Lambda args x <- ((^? match) -> Just (LambdaF args x ))
 data BindingF x = BindingF [StatementF x]
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern Binding :: Matches BindingF s => [StatementF (Content BindingF s)] -> s
 pattern Binding xs <- ((^? match) -> Just (BindingF xs))
   where Binding xs = match # BindingF xs
 
@@ -253,9 +272,11 @@ data StatementF x = SubstF LExpr x
                   -- ^ type declaration with modification
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
+pattern Subst :: Matches StatementF s => LExpr -> Content StatementF s -> s
 pattern Subst l r <- ((^? match) -> Just (SubstF l r))
   where Subst l r = match # SubstF l r
 
+pattern TypeDecl :: Matches StatementF s => ModifiedTypeExpr -> LExpr -> s
 pattern TypeDecl t x <- ((^? match) -> Just (TypeDeclF t x))
   where TypeDecl t x = match # TypeDeclF t x
 
