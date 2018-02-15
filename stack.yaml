@@ -1,8 +1,7 @@
 flags: {}
 packages:
 - .
-extra-deps:
-- directory-1.2.5.1 # required for `withCurrentDirectory`
+extra-deps: []
 local-bin-path: ./bin
-resolver: lts-6.35
+resolver: lts-10.4
 # skip-ghc-check: True

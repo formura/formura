@@ -13,6 +13,7 @@ in http://arxiv.org/abs/1204.4779 .
 {-# LANGUAGE DeriveFoldable             #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE DeriveTraversable          #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -58,24 +59,31 @@ data LoadCursorF x = LoadCursorF (Vec Int) OMNodeID
 
 
 -- | smart patterns
+pattern Load :: Matches LoadUncursoredF s => IdentName -> s
 pattern Load n <- ((^? match) -> Just (LoadF n))
   where Load n = match # LoadF n
 
+pattern Store :: Matches DataflowInstF s => IdentName -> Content DataflowInstF s -> s
 pattern Store n x <- ((^? match) -> Just (StoreF n x))
   where Store n x = match # StoreF n x
 
+pattern LoadIndex :: Matches DataflowInstF s => Int -> s
 pattern LoadIndex n <- ((^? match) -> Just (LoadIndexF n))
   where LoadIndex n = match # LoadIndexF n
 
+pattern LoadExtent :: Matches DataflowInstF s => Int -> s
 pattern LoadExtent n <- ((^? match) -> Just (LoadExtentF n))
   where LoadExtent n = match # LoadExtentF n
 
+pattern Shift :: Matches ShiftF s => Vec Int -> Content ShiftF s -> s
 pattern Shift v x <- ((^? match) -> Just (ShiftF v x))
   where Shift v x = match # ShiftF v x
 
+pattern LoadCursor :: Matches LoadCursorF s => Vec Int -> OMNodeID -> s
 pattern LoadCursor v x <- ((^? match) -> Just (LoadCursorF v x))
   where LoadCursor v x = match # LoadCursorF v x
 
+pattern LoadCursorStatic :: Matches LoadCursorF s => Vec Int -> IdentName -> s
 pattern LoadCursorStatic v x <- ((^? match) -> Just (LoadCursorStaticF v x))
   where LoadCursorStatic v x = match # LoadCursorStaticF v x
 
@@ -193,9 +201,11 @@ type MMGraph = Graph MMInstruction OMNodeType
 data NodeValueF x = NodeValueF OMNodeID OMNodeType
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
+pattern NodeValue :: Matches NodeValueF s => OMNodeID -> OMNodeType -> s
 pattern NodeValue n t <- ((^? match) -> Just (NodeValueF n t))
   where NodeValue n t = match # NodeValueF n t
 
+pattern (:.) :: Matches NodeValueF s => OMNodeID -> OMNodeType -> s
 pattern n :. t <- ((^? match) -> Just (NodeValueF n t))
   where n :. t = match # NodeValueF n t
 
@@ -203,6 +213,7 @@ pattern n :. t <- ((^? match) -> Just (NodeValueF n t))
 data FunValueF x = FunValueF LExpr RXExpr
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
+pattern FunValue :: Matches FunValueF s => LExpr -> RXExpr -> s
 pattern FunValue l r <- ((^? match) -> Just (FunValueF l r))
   where FunValue l r = match # FunValueF l r
 
