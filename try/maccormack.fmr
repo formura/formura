@@ -1,0 +1,14 @@
+dimension :: 1
+axes :: x
+
+double :: mu = if 1==2 then 0.1 else 0.2
+extern function :: fabs
+
+begin function u = init()
+  double [] :: u = 0
+end function
+
+begin function u_next = step(u)
+  u1[i] = fabs u[i] - mu*(u[i+1] - u[i])
+  u_next[i+1] = (u[i] + u1[i] - mu*(u1[i] - u1[i-1]))/2
+end function

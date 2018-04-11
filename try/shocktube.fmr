@@ -1,0 +1,40 @@
+dimension :: 1
+axes :: x
+
+double :: gamma = 1.4
+double :: dx = 1.0
+double :: dt = 0.3
+double :: D = 0.2
+
+d = fun(q) (q[i] - q[i-1])
+d' = fun(q) (q[i+1] - q[i])
+viscosity = fun(q) -D*dx*(q[i+1] - 2*q[i] + q[i-1])
+
+begin function (rf, mf, ef) = flux(r, m, e)
+    rf = m
+    mf = (gamma - 1)*e + (3 - gamma)*m**2/(2*r)
+    ef = gamma*e*m/r - (gamma - 1)*(m**3)/(2*r**2)
+end function
+
+begin function (r', m', e') = first_step(Q)
+    E = flux(Q)
+
+    (r', m', e') = Q - (dt/dx)*(d' E + viscosity Q)
+end function
+
+begin function (r'', m'', e'') = second_step(Q,Q')
+    E' = flux(Q')
+
+    (r'', m'', e'') = (Q+Q')/2 - (dt/dx/2)*(d E' + viscosity Q')
+end function
+
+begin function (r, m, e) = init()
+    double [] :: r = 0, m = 0, e = 0
+end function
+
+begin function (r_next, m_next, e_next) = step(r, m, e)
+    Q = (r, m, e)
+
+    manifest :: Q_half = first_step(Q)
+    (r_next, m_next, e_next) = second_step(Q, Q_half)
+end function
