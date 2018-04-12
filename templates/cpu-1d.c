@@ -58,8 +58,8 @@ void Formura_Init(Formura_Navi *n, MPI_Comm comm) {
 
 double to_pos_x(int ix, Formura_Navi n) {
   int WX = PX*LX;
-  int dx = (Ns*n.time_step)%WX;
-  return h*((ix+n.offset_x-dx+WX)%WX);
+  int d = (Ns*n.time_step)%WX;
+  return dx*((ix+n.offset_x-d+WX)%WX);
 }
 
 // 1タイムステップ更新
