@@ -1,0 +1,65 @@
+name: formura
+version: '1.1'
+synopsis: Formura is a simple language to describe stencil computation.
+category: Language
+author: Takayuki Muranushi, Youhei Ishihara
+maintainer: y.ishihara.1993@gmail.com
+license: MIT
+homepage: https://github.com/formura/formura#readme
+git: git://github.com/formura/formura.git
+ghc-options:
+- -O3
+- -Wall
+- -fno-warn-unused-do-bind
+- -threaded
+- -rtsopts
+- -with-rtsopts=-N
+dependencies:
+- base ==4.*
+- containers
+- lens
+- mtl
+
+library:
+  source-dirs: src
+  ghc-options:
+  - -fsimpl-tick-factor=326680
+  dependencies:
+  - aeson
+  - ansi-wl-pprint
+  - binary-search >=1.0.0.3
+  - bytestring
+  - cases
+  - directory
+  - either
+  - filepath
+  - heterocephalus
+  - lattices
+  - mmorph
+  - optparse-applicative
+  - parsers
+  - process
+  - QuickCheck
+  - sbv
+  - syb
+  - text
+  - temporary
+  - tostring
+  - transformers
+  - trifecta
+  - unordered-containers
+  - vector
+  - yaml
+
+executables:
+  formura:
+    main: formura.hs
+    source-dirs: app
+    dependencies:
+    - formura
+    - aeson
+    - ansi-wl-pprint
+    - bytestring
+    - text
+    - trifecta
+    - yaml
