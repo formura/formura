@@ -3,7 +3,6 @@
 module Formura.GlobalEnvironment where
 
 import Control.Lens
-import Data.Char (toUpper)
 
 import Formura.NumericalConfig
 import Formura.Syntax
