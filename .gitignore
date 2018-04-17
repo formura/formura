@@ -5,3 +5,4 @@ bin/c-incubator
 bin/incubator
 bin/make-make
 *.cabal
+examples/*/*.c
