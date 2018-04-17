@@ -29,10 +29,10 @@ int Formura_Encode_rank(int px, int py, int pz) {
   return (x + y*P#{a1} + z*P#{a1}*P#{a2});
 }
 
-void Formura_Init(Formura_Navi *n) {
+void Formura_Init(Formura_Navi *n, MPI_Comm comm) {
   int size, rank;
-  MPI_Comm_size(MPI_COMM_WORLD, &size);
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(comm, &size);
+  MPI_Comm_rank(comm, &rank);
 
   int ix,iy,iz;
   Formura_Decode_rank(rank, &ix, &iy, &iz);
@@ -53,6 +53,7 @@ void Formura_Init(Formura_Navi *n) {
   n->rank_0_m1_m1 = Formura_Encode_rank(ix, iy-1, iz-1);
   n->rank_p1_p1_p1 = Formura_Encode_rank(ix+1, iy+1, iz+1);
   n->rank_m1_m1_m1 = Formura_Encode_rank(ix-1, iy-1, iz-1);
+  n->mpi_world = comm;
 
   n->lower_#{map toLower a1} = 2*D#{a1};
   n->upper_#{map toLower a1} = N#{a1}*M#{a1};
