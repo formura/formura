@@ -3,6 +3,3 @@ grid_per_node: [100]   # 1ノードあたりの各軸方向の有効格子数 (M
 grid_per_block: [10]     # 1ブロックあたりの各軸方向の格子数 (Must)
 temporal_blocking_interval: 5  # Temporal Blockingする時間ステップ数 (Must)
 mpi_shape: [1]             # 各軸方向のMPIノード数 (Must)
-# with_simd: true                # SIMDのintrinsic命令を出力 (Optional)
-# with_omp: true                 # OpenMP並列の有効化 (Optional)
-# with_nbu: [1,1,1]              # Nano blocking unrollの有効化 (Optional)
