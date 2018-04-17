@@ -30,7 +30,7 @@ extern double d#{map toLower a};
 %{ endforall }
 
 // グローバル配列
-%{ forall (t,q) <- qs }
+%{ forall (q,t) <- qs }
 extern #{t} #{q}#{globalSize};
 %{ endforall}
 
