@@ -72,7 +72,7 @@ void Formura_Init(Formura_Navi *n) {
   printf("  ix = %d\n", ix);
   printf("  iy = %d\n", iy);
   printf("  iz = %d\n", iz);
-  printf("  rank_0_0_0 = %d\n", n->rank_0_0_0);
+  printf("  my_rank = %d\n", n->my_rank);
   printf("  rank_p1_0_0 = %d\n", n->rank_p1_0_0);
   printf("  rank_m1_0_0 = %d\n", n->rank_m1_0_0);
   printf("  rank_0_p1_0 = %d\n", n->rank_0_p1_0);
