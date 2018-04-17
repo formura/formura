@@ -4,7 +4,10 @@ N = 1
 .SUFFIXES:
 .PRECIOUS: %.s
 
-%.s: %.c
+diffusion2.c diffusion2.h: diffusion2.fmr diffusion2.yaml
+	formura diffusion1.fmr
+
+%.s: %.c diffusion2.h
 	$(CC) $(CCFLAG) -S $< -o $@
 
 %.o: %.s
