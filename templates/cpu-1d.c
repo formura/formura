@@ -41,15 +41,14 @@ void Formura_Init(Formura_Navi *n, MPI_Comm comm) {
 
   n->time_step = 0;
 
-  n->lower_x = 2*D#{a1};
-  n->upper_x = N#{a1}*M#{a1};
-  n->offset_x = ix*L#{a1} - 2*D#{a1};
-  n->length_x = d#{map toLower a1}*L#{a1}*P#{a1};
+  n->lower_#{map toLower a1} = 2*D#{a1};
+  n->upper_#{map toLower a1} = N#{a1}*M#{a1};
+  n->offset_#{map toLower a1} = ix*L#{a1} - 2*D#{a1};
+  n->length_#{map toLower a1} = d#{map toLower a1}*L#{a1}*P#{a1};
 
 
   printf("Formura_Init\n");
   printf("  rank = %d/%d\n", rank, size);
-  printf("  p0 = %d\n", p0);
   printf("  ix = %d\n", ix);
   printf("  my_rank = %d\n", n->my_rank);
   printf("  rank_p1 = %d\n", n->rank_p1);
@@ -59,7 +58,7 @@ void Formura_Init(Formura_Navi *n, MPI_Comm comm) {
 double to_pos_#{map toLower a1}(int ix, Formura_Navi n) {
   int W#{a1} = P#{a1}*L#{a1};
   int d = (Ns*n.time_step)%W#{a1};
-  return d#{map toLower a1}*((ix+n.offset_x-d+W#{a1})%W#{a1});
+  return d#{map toLower a1}*((ix+n.offset_#{map toLower a1}-d+W#{a1})%W#{a1});
 }
 
 // 1タイムステップ更新

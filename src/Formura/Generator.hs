@@ -47,8 +47,8 @@ genCode mm = do
   T.writeFile hxxFilePath $ renderMarkup $(compileTextFile "templates/cpu.h")
   T.writeFile cxxFilePath $ renderMarkup $ case dim of
     1 -> let [a1] = axes in $(compileTextFile "templates/cpu-1d.c")
-    2 -> let [a1,a2] = axes in undefined
-    3 -> let [a1,a2,a3] = axes in undefined
+    2 -> let [a1,a2] = axes in $(compileTextFile "templates/cpu-2d.c")
+    3 -> let [a1,a2,a3] = axes in $(compileTextFile "templates/cpu-3d.c")
     _ -> error "Not support"
   putStr . unlines $ [ "Generate:"
                      , "  " ++ cxxFilePath
