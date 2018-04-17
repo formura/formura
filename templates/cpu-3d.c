@@ -543,7 +543,7 @@ void Formura_Forward(Formura_Navi *n) {
     for(int iy = 0; iy < L#{a2}; iy++) {
       for(int iz = 0; iz < 2*D#{a3}; iz++) {
 %{ forall (i,q) <- nqs }
-        #{q}[ix][iy+2*D#{a2}][iz] = q_recv_buf_zx[ix][iy][iz][#{i};
+        #{q}[ix][iy+2*D#{a2}][iz] = q_recv_buf_zx[ix][iy][iz][#{i}];
 %{ endforall }
       }
     }
@@ -552,7 +552,7 @@ void Formura_Forward(Formura_Navi *n) {
     for(int iy = 0; iy < L#{a2}; iy++) {
       for(int iz = 0; iz < L#{a3}; iz++) {
 %{ forall (i,q) <- nqs }
-        #{q}[ix][iy+2*D#{a2}][iz+2*D#{a3}] = q_recv_buf_x[ix][iy][iz][#{i};
+        #{q}[ix][iy+2*D#{a2}][iz+2*D#{a3}] = q_recv_buf_x[ix][iy][iz][#{i}];
 %{ endforall }
       }
     }
