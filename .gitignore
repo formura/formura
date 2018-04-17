@@ -6,6 +6,9 @@ bin/incubator
 bin/make-make
 *.cabal
 examples/*/*.c
+examples/*/*.o
+examples/*/*.s
+examples/*/main
 !examples/*/main.c
 examples/*/*.h
 examples/*/plot_result.pdf
