@@ -1,0 +1,16 @@
+dimension :: 2
+axes :: x,y
+
+d_xx = fun(q) (q[i+1,j] + q[i-1,j] - 2*q[i,j])/dx**2
+d_yy = fun(q) (q[i,j+1] + q[i,j-1] - 2*q[i,j])/dy**2
+double :: dt = 0.1*dx*dx
+
+begin function q = init()
+  double [] :: q = 0
+end function
+
+begin function q_next = step(q)
+  q_xx = d_xx(q)
+  q_yy = d_yy(q)
+  q_next = q + dt*(q_xx + q_yy)
+end function
