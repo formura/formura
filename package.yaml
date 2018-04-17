@@ -11,24 +11,26 @@ ghc-options:
 - -O3
 - -Wall
 - -fno-warn-unused-do-bind
-- -threaded
-- -rtsopts
-- -with-rtsopts=-N
 dependencies:
 - base ==4.*
+- aeson
+- ansi-wl-pprint
+- bytestring
 - containers
 - lens
 - mtl
+- scientific
+- text
+- trifecta
+- yaml
 
 library:
   source-dirs: src
   ghc-options:
   - -fsimpl-tick-factor=326680
   dependencies:
-  - aeson
-  - ansi-wl-pprint
   - binary-search >=1.0.0.3
-  - bytestring
+  - blaze-markup
   - cases
   - directory
   - either
@@ -42,24 +44,27 @@ library:
   - QuickCheck
   - sbv
   - syb
-  - text
   - temporary
   - tostring
   - transformers
-  - trifecta
   - unordered-containers
   - vector
-  - yaml
 
 executables:
   formura:
     main: formura.hs
     source-dirs: app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
     dependencies:
     - formura
-    - aeson
-    - ansi-wl-pprint
-    - bytestring
-    - text
-    - trifecta
-    - yaml
+
+tests:
+  spec:
+    main: Spec.hs
+    source-dirs: test
+    dependencies:
+    - formura
+    - hspec

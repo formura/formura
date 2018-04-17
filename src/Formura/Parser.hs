@@ -19,13 +19,14 @@ module Formura.Parser where
 import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
-import           Data.Char (isAlphaNum, isLetter, isPrint, isSpace, toUpper)
+import           Data.Char (isAlphaNum, isLetter, isPrint, isSpace, toLower)
 import           Data.Either (partitionEithers)
 import           Data.Foldable (toList)
 import           Data.Maybe
 import           Data.Monoid
+import           Data.Ratio
 import qualified Data.Set as S
-import           System.IO.Unsafe
+import           Data.Scientific
 import qualified Text.Parser.Expression as X
 import qualified Text.PrettyPrint.ANSI.Leijen as Ppr
 import           Text.Trifecta hiding (ident)
@@ -38,7 +39,6 @@ import Formura.Language.Combinator
 import Formura.NumericalConfig
 import Formura.Syntax
 import Formura.Type (elementTypenames)
-import Formura.Utilities (readYamlDef)
 import Formura.Vec
 
 -- * The parser comibnator
@@ -479,28 +479,26 @@ specialDeclaration = dd  <|> ad
       xs <- identName `sepBy` symbolic ','
       return $ AxesDeclaration xs
 
-program :: WithCommandLineOption => P Program
-program = do
+program :: WithCommandLineOption => NumericalConfig -> P Program
+program nc0 = do
 
   ps <- choice [Left <$> specialDeclaration, Right <$> statementCompound]
         `sepEndBy` statementDelimiter
   let (decls, stmts) = partitionEithers ps
 
-  let mnc = unsafePerformIO $ readYamlDef defaultNumericalConfig ncFilePath
-  nc0 <- case mnc of
-     Nothing -> raiseErr $ failed $ "cannot parse numerical config .yaml file: " ++ show ncFilePath
-     Just x -> return (x :: NumericalConfig)
-
-  let nc = nc0 & ncOptionStrings %~ ((?commandLineOption ^. auxNumericalConfigOptions) ++)
-  let globalExtents = toList $ (nc ^. ncIntraNodeShape) * (nc ^. ncMPIGridShape)
-      ivars = head [x | AxesDeclaration x <- decls]
+  -- let nc = nc0 & ncOptionStrings %~ ((?commandLineOption ^. auxNumericalConfigOptions) ++)
+  let ivars = head [x | AxesDeclaration x <- decls]
 
       extentVarNames :: [IdentName]
-      extentVarNames = map (("N" ++) . map toUpper) ivars
+      extentVarNames = map (("d" ++) . map toLower) ivars
 
-      mkExtentStmt :: IdentName -> Int -> StatementF RExpr
-      mkExtentStmt x n = SubstF (Ident x) (Imm $ fromIntegral n)
+      mkExtentStmt :: IdentName -> Scientific -> Int -> StatementF RExpr
+      mkExtentStmt x l n = SubstF (Ident x) (Imm $  ln % (ld * fromIntegral n))
+        where 
+          l' = toRational l
+          ln = numerator l'
+          ld = denominator l'
 
-      globalExtentStmts = zipWith mkExtentStmt extentVarNames globalExtents
+      globalExtentStmts = zipWith3 mkExtentStmt extentVarNames (toList $ nc0 ^. ncLengthPerNode) (toList $ nc0 ^. ncGridPerNode)
 
-  return $ Program decls (BindingF $ globalExtentStmts ++ concat stmts) nc
+  return $ Program decls (BindingF $ globalExtentStmts ++ concat stmts) nc0

@@ -1,26 +1,24 @@
 #include <mpi.h>
-#define PX #{node_x}
-#define P0 PX
+#define PX 1
+#define P0 1
 
-#define NT #{temporal_blocking_interval}
+#define NT 5
 
-#define NX #{grid_per_block_x}
-#define MX #{block_per_node_x}
+#define NX 10
+#define MX 11
 
-#define Ns #{sleeve}
+#define Ns 1
+
+#define LX 100
+
+#define LENGTH_PER_NODE_X 1.0
 
 #define DX (Ns*NT)
-#define LX #{grid_per_node_x}
-
-#define LENGTH_PER_NODE_X #{length_per_node_x}
-#define SPACE_INTERVAL (LENGTH_PER_NODE_X/LX)
-
+#define SPACE_INTERVAL_X (LENGTH_PER_NODE_X/LX)
 extern double dx;
 
 // グローバル配列
-%{ forall (t,q) <- qs }
-extern #{t} #{q}[NX*MX];
-%{ endforall}
+extern q double[NX*MX];
 
 typedef struct {
   int time_step;

@@ -1,0 +1,14 @@
+dimension :: 1
+axes :: x
+
+d_xx = fun(q) (q[i+1] + q[i-1] - 2*q[i])/dx**2
+double :: dt = 0.1*dx*dx
+
+begin function q = init()
+  double [] :: q = 0
+end function
+
+begin function q_next = step(q)
+  q_xx = d_xx(q)
+  q_next = q + dt*q_xx
+end function

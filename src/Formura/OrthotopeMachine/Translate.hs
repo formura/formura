@@ -14,6 +14,7 @@ module Formura.OrthotopeMachine.Translate where
 
 import           Algebra.Lattice
 import           Control.Applicative
+import           Control.Exception
 import           Control.Lens hiding (at, op)
 import           Control.Monad
 import "mtl"     Control.Monad.Reader hiding (fix)
@@ -21,6 +22,7 @@ import           Data.Foldable
 import qualified Data.Map as M
 import           Data.Ratio
 import qualified Data.Set as S
+import           System.Exit
 import           Text.Trifecta (failed, raiseErr)
 
 import qualified Formura.Annotation as A
@@ -29,11 +31,11 @@ import           Formura.Compiler
 import           Formura.GlobalEnvironment
 import           Formura.Language.Combinator
 import           Formura.Language.TExpr
+import           Formura.NumericalConfig
 import           Formura.OrthotopeMachine.Graph
 import           Formura.Syntax
 import           Formura.Type
 import           Formura.Vec
-
 
 type Binding = M.Map IdentName ValueExpr
 type LexBinding = M.Map IdentName ValueLexExpr
@@ -88,7 +90,6 @@ setupGlobalEnvironment prog = do
     _  -> raiseErr $ failed "multiple axes declaration found."
   dimension .= dim
   axesNames .= Vec axs
-  envNumericalConfig .= prog ^. programNumericalConfig
   where
     spDecls = prog ^. programSpecialDeclarations
 
@@ -568,6 +569,32 @@ lookupToplevelIdents fprog name0 =  case lup stmts of
     lup (SubstF (Ident nam) rhs : xs) | nam == name0 = rhs : lup xs
     lup (_:xs) = lup xs
 
+calcSleeve :: OMGraph -> Int
+calcSleeve g = maximum $ map traceNode $ findStore g
+  where
+    findStore :: OMGraph -> [OMNodeID]
+    findStore = M.foldr getStore []
+
+    getStore (Node (Store _ i) _ _) acc = i:acc
+    getStore _ acc = acc
+
+    traceNode :: OMNodeID -> Int
+    traceNode i0 = maximum $ go i0 (pure 0)
+      where
+        go :: OMNodeID -> Vec Int -> Vec Int
+        go i s =
+          case M.lookup i g of
+            Just (Node (Load _) _ _) -> s
+            Just (Node (LoadIndex _) _ _) -> s
+            Just (Node (LoadExtent _) _ _) -> s
+            Just (Node (Imm _) _ _) -> s
+            Just (Node (Uniop _ i') _ _) -> go i' s
+            Just (Node (Binop _ i1 i2) _ _) -> go i1 s `max` go i2 s
+            Just (Node (Triop _ i1 i2 i3) _ _) -> maximum [go i1 s,go i2 s,go i3 s]
+            Just (Node (Naryop _ is) _ _) -> maximum [go i' s | i' <- is]
+            Just (Node (Shift d i') _ _) -> go i' (s + abs d)
+            _ -> s
+
 genOMProgram :: Program -> IO OMProgram
 genOMProgram fprog = do
   let run g = runCompilerRight g defaultCodegenRead defaultCodegenState
@@ -591,9 +618,13 @@ genOMProgram fprog = do
     bs99 <- matchToLhs lhsOfStep stepType
     return $ M.fromList bs99
 
-  return MachineProgram
-    { _omGlobalEnvironment = stInit ^. globalEnvironment
-    , _omInitGraph = stInit ^. theGraph
-    , _omStepGraph = stStep ^. theGraph
-    , _omStateSignature = stateSignature0
-    }
+  let sleeve = calcSleeve (stStep ^. theGraph)
+  case convertConfig sleeve (fprog ^. programNumericalConfig) of
+    Left err -> die $ "Error: " ++ displayException err
+    Right cfg -> do
+      return MachineProgram
+        { _omGlobalEnvironment = (stInit ^. globalEnvironment) & envNumericalConfig .~ cfg
+        , _omInitGraph = stInit ^. theGraph
+        , _omStepGraph = stStep ^. theGraph
+        , _omStateSignature = stateSignature0
+        }

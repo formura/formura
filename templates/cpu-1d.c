@@ -4,21 +4,21 @@
 %{ if with_simd }
 #include <x86intrin.h>
 %{ endif }
-#include "#{target}.h"
+#include "#{hxxFileName}"
 
-double dx = SPACE_INTERVAL;
+double d#{map toLower a1} = SPACE_INTERVAL_#{a1};
 
 // グローバル配列の宣言
-%{ forall (t,q) <- qs }
-#{t} #{q}[NX*MX];
+%{ forall (q,t) <- qs }
+#{t} #{q}#{globalSize};
 %{ endforall}
 
 void Formura_Decode_rank(int p, int *px) {
-  *px = (int)p%PX;
+  *px = (int)p%P#{a1};
 }
 
 int Formura_Encode_rank(int px) {
-  int x = (px + PX)%PX;
+  int x = (px + P#{a1})%P#{a1};
   return x;
 }
 
@@ -31,7 +31,7 @@ void Formura_Init(Formura_Navi *n, MPI_Comm comm) {
     printf("WARNING: inconsistent mpi size\n");
   }
 
-  int ix,iy;
+  int ix;
   Formura_Decode_rank(rank, &ix);
 
   n->my_rank = Formura_Encode_rank(ix);
@@ -41,10 +41,10 @@ void Formura_Init(Formura_Navi *n, MPI_Comm comm) {
 
   n->time_step = 0;
 
-  n->lower_x = 2*DX;
-  n->upper_x = NX*MX;
-  n->offset_x = ix*LX - 2*DX;
-  n->length_x = dx*LX*PX;
+  n->lower_x = 2*D#{a1};
+  n->upper_x = N#{a1}*M#{a1};
+  n->offset_x = ix*L#{a1} - 2*D#{a1};
+  n->length_x = d#{map toLower a1}*L#{a1}*P#{a1};
 
 
   printf("Formura_Init\n");
@@ -56,22 +56,22 @@ void Formura_Init(Formura_Navi *n, MPI_Comm comm) {
   printf("  rank_m1 = %d\n", n->rank_m1);
 }
 
-double to_pos_x(int ix, Formura_Navi n) {
-  int WX = PX*LX;
-  int d = (Ns*n.time_step)%WX;
-  return dx*((ix+n.offset_x-d+WX)%WX);
+double to_pos_#{map toLower a1}(int ix, Formura_Navi n) {
+  int W#{a1} = P#{a1}*L#{a1};
+  int d = (Ns*n.time_step)%W#{a1};
+  return d#{map toLower a1}*((ix+n.offset_x-d+W#{a1})%W#{a1});
 }
 
 // 1タイムステップ更新
 typedef struct {
-%{ forall (t,q) <- qs }
-  #{t} #{q}[NX+2*Ns];
+%{ forall (q,t) <- qs }
+  #{t} #{q}[N#{a1}+2*Ns];
 %{ endforall }
 } Formura_Buff;
 
 typedef struct {
-%{ forall (t,q) <- qs }
-  #{t} #{q}[NX];
+%{ forall (q,t) <- qs }
+  #{t} #{q}[N#{a1}];
 %{ endforall }
 } Formura_Rslt;
 
@@ -82,9 +82,9 @@ void Formura_Step(Formura_Buff *buff, Formura_Rslt *rslt) {
 typedef struct {
   int x_origin;
 
-%{ forall (t,q) <- qs }
+%{ forall (q,t) <- qs }
   #{t} #{q}_wall_x[NT][2*Ns];
-  #{t} #{q}_res[NX];
+  #{t} #{q}_res[N#{a1}];
 %{ endforall }
 } Formura_Param;
 
@@ -95,22 +95,22 @@ void Formura_Update(Formura_Param *p) {
 
   // 床を読む
   int ix0 = p->x_origin;
-  for(int ix = 0; ix < NX; ix++) {
-%{ forall (_,q) <- qs }
+  for(int ix = 0; ix < N#{a1}; ix++) {
+%{ forall (q,_) <- qs }
     rslt.#{q}[ix] = #{q}[ix0+ix];
 %{ endforall }
   }
 
   for(int it = 0; it < NT; it++) {
-    for(int ix = 0; ix < NX; ix++) {
-%{ forall (_,q) <- qs }
-      buff.#{q}[ix][iy] = rslt.#{q}[ix][iy];
+    for(int ix = 0; ix < N#{a1}; ix++) {
+%{ forall (q,_) <- qs }
+      buff.#{q}[ix] = rslt.#{q}[ix];
 %{ endforall }
     }
     // x壁を読む
     for(int ix = 0; ix < 2*Ns; ix++) {
-%{ forall (_,q) <- qs }
-      buff.#{q}[ix+NX] = p->#{q}_wall_x[it][ix];
+%{ forall (q,_) <- qs }
+      buff.#{q}[ix+N#{a1}] = p->#{q}_wall_x[it][ix];
 %{ endforall }
     }
 
@@ -118,33 +118,33 @@ void Formura_Update(Formura_Param *p) {
 
     // x壁を書く
     for(int ix = 0; ix < 2*Ns; ix++) {
-%{ forall (_,q) <- qs }
+%{ forall (q,_) <- qs }
       p->#{q}_wall_x[it][ix] = buff.#{q}[ix];
 %{ endforall }
     }
   }
 
   // 床を書く
-  for(int ix = 0; ix < NX; ix++) {
-%{ forall (_,q) <- qs }
+  for(int ix = 0; ix < N#{a1}; ix++) {
+%{ forall (q,_) <- qs }
     p->#{q}_res[ix] = rslt.#{q}[ix];
 %{ endforall }
   }
 }
 
-%{ forall (_,q) <- qs }
-#{t} #{q}_tmp[MX*NX];
+%{ forall (q,t) <- qs }
+#{t} #{q}_tmp[M#{a1}*N#{a1}];
 %{ endforall }
 void Formura_Forward(Formura_Navi *n) {
   Formura_Param p;
   
   // 床の準備
-  #{fst (head qs)} q_send_buf_x[2*DX][#{length qs}];
-  #{fst (head qs)} q_recv_buf_x[2*DX][#{length qs}];
+  #{snd (head qs)} q_send_buf_x[2*D#{a1}][#{length qs}];
+  #{snd (head qs)} q_recv_buf_x[2*D#{a1}][#{length qs}];
 
-  for(int ix = 0; ix < 2*DX; ix++) {
-%{ forall (i,(_,q)) <- zip [0..] qs }
-    q_send_buf_x[ix] = #{q}[ix+LX][#{i}];
+  for(int ix = 0; ix < 2*D#{a1}; ix++) {
+%{ forall (i,q) <- nqs }
+    q_send_buf_x[ix][#{i}] = #{q}[ix+L#{a1}];
 %{ endforall }
   }
 
@@ -155,22 +155,22 @@ void Formura_Forward(Formura_Navi *n) {
   // x壁の初期化
   for(int it = 0; it < NT; it++) {
     for(int ix = 0; ix < 2*Ns; ix++) {
-%{ forall (_,q) <- qs }
+%{ forall (q,_) <- qs }
         p.#{q}_wall_x[it][ix] = 1.0;
 %{ endforall }
     }
   }
 
   // 床の更新
-  for(int jx = MX - 1; jx > 2*DX/NX; jx--) {
+  for(int jx = M#{a1} - 1; jx > 2*D#{a1}/N#{a1}; jx--) {
 
-    p.x_origin = jx*NX;
+    p.x_origin = jx*N#{a1};
     Formura_Update(&p);
 
     // 床の受けとり
-    for(int ix = 0; ix < NX; ix++) {
-%{ forall (_,q) <- qs }
-      #{q}_tmp[ix+jx*NX] = p.#{q}_res[ix];
+    for(int ix = 0; ix < N#{a1}; ix++) {
+%{ forall (q,_) <- qs }
+      #{q}_tmp[ix+jx*N#{a1}] = p.#{q}_res[ix];
 %{ endforall }
     }
   }
@@ -179,30 +179,30 @@ void Formura_Forward(Formura_Navi *n) {
   MPI_Wait(&send_req_x, MPI_STATUS_IGNORE);
   MPI_Wait(&recv_req_x, MPI_STATUS_IGNORE);
 
-  for(int ix = 0; ix < 2*DX; ix++) {
-%{ forall (i,(_,q)) <- zip [0..] qs }
+  for(int ix = 0; ix < 2*D#{a1}; ix++) {
+%{ forall (i,q) <- nqs }
     #{q}[ix] = q_recv_buf_x[ix][#{i}];
 %{ endforall }
   }
 
   // 残りの床を更新
-  for(int jx = 2*DX/NX; jx >= 0; jx--) {
+  for(int jx = 2*D#{a1}/N#{a1}; jx >= 0; jx--) {
 
-    p.x_origin = jx*NX;
+    p.x_origin = jx*N#{a1};
     Formura_Update(&p);
 
     // 床の受けとり
-    for(int ix = 0; ix < NX; ix++) {
-%{ forall (_,q) <- qs }
-      #{q}_tmp[ix+jx*NX] = p.#{q}_res[ix];
+    for(int ix = 0; ix < N#{a1}; ix++) {
+%{ forall (q,_) <- qs }
+      #{q}_tmp[ix+jx*N#{a1}] = p.#{q}_res[ix];
 %{ endforall }
     }
   }
 
   // 床の書き出し
-  for(int ix = 0; ix < LX; ix++) {
-%{ forall (_,q) <- qs }
-    #{q}[ix+2*DX] = #{q}_tmp[ix];
+  for(int ix = 0; ix < L#{a1}; ix++) {
+%{ forall (q,_) <- qs }
+    #{q}[ix+2*D#{a1}] = #{q}_tmp[ix];
 %{ endforall }
   }
 
