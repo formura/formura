@@ -35,6 +35,7 @@ library:
   - directory
   - either
   - filepath
+  - gitrev
   - heterocephalus
   - lattices
   - mmorph
