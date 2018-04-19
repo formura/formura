@@ -1,11 +1,14 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ImplicitParams #-}
 module Main where
 
+import           Control.Exception
 import           Control.Lens
 import           Control.Monad
 import qualified Data.Map as M
 import           Data.Monoid
 import           System.IO
+import           System.Exit
 import qualified Text.PrettyPrint.ANSI.Leijen as Ppr
 import qualified Text.Trifecta as P
 
@@ -13,9 +16,8 @@ import qualified Formura.Annotation as A
 import           Formura.Annotation.Representation
 import           Formura.CommandLineOption
 import           Formura.Desugar
-import           Formura.MPICxx.Language (TargetLanguage(..), targetLanguage)
-import qualified Formura.MPICxx.Translate as C
-import qualified Formura.MPIFortran.Translate as F
+import           Formura.NumericalConfig
+import           Formura.Generator (genCode)
 import           Formura.OrthotopeMachine.Graph
 import           Formura.OrthotopeMachine.Manifestation (genMMProgram)
 import           Formura.OrthotopeMachine.Translate (genOMProgram)
@@ -32,9 +34,15 @@ main = do
 
 process :: WithCommandLineOption => FilePath -> IO ()
 process fn = do
-  mprog <- P.parseFromFileEx (P.runP $ P.program <* P.eof) fn
+  nc <- readConfig ncFilePath
+          `catches` [Handler (\(_ :: IOException) -> die $ "Error: Unable to read " ++ ncFilePath)
+                    ,Handler (\(e :: ConfigException) -> die $ "Error: " ++ displayException e)
+                    ]
+  mprog <- P.parseFromFileEx (P.runP $ P.program nc <* P.eof) fn
   case mprog of
-    P.Failure err -> Ppr.displayIO stdout $ Ppr.renderPretty 0.8 80 $ P._errDoc err <> Ppr.linebreak
+    P.Failure err -> do
+      Ppr.displayIO stderr $ Ppr.renderPretty 0.8 80 $ P._errDoc err <> Ppr.linebreak
+      exitFailure
     P.Success prog -> codegen prog
 
 
@@ -70,6 +78,10 @@ codegen sugarcoated_prog = do
 
   mmProg <- genMMProgram omProg
   when (?commandLineOption ^. verbose) $ do
+    putStrLn "## Debug print: simulation state"
+    print (mmProg ^. omStateSignature)
+    putStrLn ""
+
     putStrLn "## Debug print: manifested init graph"
     mapM_ pprMMNode $ M.toList (mmProg ^. omInitGraph)
     putStrLn ""
@@ -78,11 +90,8 @@ codegen sugarcoated_prog = do
     mapM_ pprMMNode $ M.toList (mmProg ^. omStepGraph)
     putStrLn ""
 
-  putStrLn $ "Target language is:" ++ show targetLanguage
-  case targetLanguage of
-    MPICxx -> C.genCxxFiles prog mmProg
-    MPIFortran -> F.genFortranFiles prog mmProg
-
+  putStrLn "Generating code..."
+  genCode mmProg
 
 pprNode :: (OMNodeID, OMNode) -> IO ()
 pprNode (i,n) = do
