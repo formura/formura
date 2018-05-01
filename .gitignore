@@ -8,6 +8,7 @@ bin/make-make
 examples/*/*.c
 examples/*/*.o
 examples/*/*.s
+examples/*/run
 examples/*/main
 !examples/*/main.c
 examples/*/*.h
