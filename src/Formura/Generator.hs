@@ -168,7 +168,8 @@ genRunningScript :: String -> Int -> IO ()
 genRunningScript fn n = do
   let script = unlines ["#!/bin/bash"
                        ,"prog=${1:?Need an executable file path}"
-                       ,"mpirun -n " ++ show n ++ " ${prog}"
+                       ,"opt=${2}"
+                       ,"mpirun ${opt} -n " ++ show n ++ " ${prog}"
                        ]
   writeFile fn script
   p <- getPermissions fn
