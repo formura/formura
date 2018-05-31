@@ -12,6 +12,7 @@ import Data.List (isPrefixOf, stripPrefix)
 import qualified Data.Map as M
 import Data.Scientific
 import qualified Data.Text.Lazy.IO as T
+import System.Directory
 import Text.Heterocephalus (compileTextFile)
 import Text.Blaze.Renderer.Text (renderMarkup)
 import Text.Printf
@@ -44,6 +45,8 @@ genCode mm = do
       nqs = zip [0..] $ map fst qs :: [(Int,String)]
       step = mkStep axes $ mm ^. omStepGraph
       with_simd = False
+  let runningScriptPath = "run"
+  genRunningScript runningScriptPath totalMPI
   T.writeFile hxxFilePath $ renderMarkup $(compileTextFile "templates/cpu.h")
   T.writeFile cxxFilePath $ renderMarkup $ case dim of
     1 -> let [a1] = axes in $(compileTextFile "templates/cpu-1d.c")
@@ -53,6 +56,7 @@ genCode mm = do
   putStr . unlines $ [ "Generate:"
                      , "  " ++ cxxFilePath
                      , "  " ++ hxxFilePath
+                     , "  " ++ runningScriptPath
                      ]
 
 mkRanks :: Int -> [String]
@@ -158,3 +162,15 @@ mkStep axes mmg = withTmp $ unlines [ genMMInst omid $ if isVoid omt then mm els
                   -- Naryop op xs -> undefined
                   x -> error $ "Unimplemented for keyword: " ++ show x
       in unwords [lhs, "=", rhs]
+
+
+genRunningScript :: String -> Int -> IO ()
+genRunningScript fn n = do
+  let script = unlines ["#!/bin/bash"
+                       ,"prog=${1:?Need an executable file path}"
+                       ,"opt=${2}"
+                       ,"mpirun ${opt} -n " ++ show n ++ " ${prog}"
+                       ]
+  writeFile fn script
+  p <- getPermissions fn
+  setPermissions fn $ p {executable = True}
