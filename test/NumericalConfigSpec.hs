@@ -10,7 +10,7 @@ import Formura.NumericalConfig
 
 spec :: Spec
 spec = do
-  describe "Valid case" $ do
+  describe "Valid cases" $ do
     it "1d config" $ do
       let cfg = B.unlines [ "length_per_node: [1.0]"
                           , "grid_per_node: [10]"
@@ -60,7 +60,7 @@ spec = do
                   , _ncFilterInterval = Nothing
                   }
       decodeConfig cfg `shouldBe` (Right cfg')
-  describe "Invalid case" $ do
+  describe "Invalid cases" $ do
     it "don't exist MUST fields" $ do
       let cfg = B.unlines [ "length_per_node: [1.0]"
                           , "grid_per_node: [10]"
