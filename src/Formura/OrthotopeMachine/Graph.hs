@@ -238,6 +238,7 @@ instance Typed ValueExpr where
 data MachineProgram instType typeType = MachineProgram
   { _omGlobalEnvironment :: GlobalEnvironment
   , _omInitGraph :: Graph instType typeType
+  , _omFilterGraph :: Graph instType typeType
   , _omStepGraph :: Graph instType typeType
   , _omStateSignature :: M.Map IdentName TypeExpr
   }
