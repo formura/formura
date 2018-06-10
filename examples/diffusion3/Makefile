@@ -4,7 +4,7 @@ CCFLAG = -Wall -std=c99 -lm -O3 -ffast-math -mavx2 -mfma
 .PRECIOUS: %.s
 
 diffusion3.c diffusion3.h: diffusion3.fmr diffusion3.yaml
-	formura diffusion1.fmr
+	formura diffusion3.fmr
 
 %.s: %.c diffusion3.h
 	$(CC) $(CCFLAG) -S $< -o $@
