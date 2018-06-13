@@ -90,8 +90,8 @@ typedef struct {
 
 // NTタイムステップ更新
 void Formura_Update(Formura_Param *p) {
-  Formura_Buff buff;
-  Formura_Rslt rslt;
+  static Formura_Buff buff;
+  static Formura_Rslt rslt;
 
   // 床を読む
   int ix0 = p->x_origin;
@@ -132,15 +132,15 @@ void Formura_Update(Formura_Param *p) {
   }
 }
 
-%{ forall (q,t) <- qs }
-#{t} #{q}_tmp[M#{a1}*N#{a1}];
-%{ endforall }
 void Formura_Forward(Formura_Navi *n) {
-  Formura_Param p;
+%{ forall (q,t) <- qs }
+  static #{t} #{q}_tmp[M#{a1}*N#{a1}];
+%{ endforall }
+  static Formura_Param p;
   
   // 床の準備
-  #{snd (head qs)} q_send_buf_x[2*D#{a1}][#{length qs}];
-  #{snd (head qs)} q_recv_buf_x[2*D#{a1}][#{length qs}];
+  static #{snd (head qs)} q_send_buf_x[2*D#{a1}][#{length qs}];
+  static #{snd (head qs)} q_recv_buf_x[2*D#{a1}][#{length qs}];
 
   for(int ix = 0; ix < 2*D#{a1}; ix++) {
 %{ forall (i,q) <- nqs }

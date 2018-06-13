@@ -114,8 +114,8 @@ typedef struct {
 
 // NTタイムステップ更新
 void Formura_Update(Formura_Param *p) {
-  Formura_Buff buff;
-  Formura_Rslt rslt;
+  static Formura_Buff buff;
+  static Formura_Rslt rslt;
 
   // 床を読む
   int ix0 = p->x_origin;
@@ -183,21 +183,22 @@ void Formura_Update(Formura_Param *p) {
   }
 }
 
-%{ forall (q,t) <- qs }
-#{t} #{q}_tmp[M#{a1}*N#{a1}][M#{a2}*N#{a2}];
-#{t} #{q}_tmp_wall_x[M#{a2}][NT][2*Ns][N#{a2}+2*Ns];
-#{t} #{q}_tmp_wall_y[M#{a1}][NT][N#{a1}+2*Ns][2*Ns];
-%{ endforall }
 void Formura_Forward(Formura_Navi *n) {
-  Formura_Param p;
+%{ forall (q,t) <- qs }
+  static #{t} #{q}_tmp[M#{a1}*N#{a1}][M#{a2}*N#{a2}];
+  static #{t} #{q}_tmp_wall_x[M#{a2}][NT][2*Ns][N#{a2}+2*Ns];
+  static #{t} #{q}_tmp_wall_y[M#{a1}][NT][N#{a1}+2*Ns][2*Ns];
+%{ endforall }
   
   // 床の準備
-  #{snd (head qs)} q_send_buf_x[2*D#{a1}][L#{a2}][#{length qs}];
-  #{snd (head qs)} q_send_buf_y[L#{a1}][2*D#{a2}][#{length qs}];
-  #{snd (head qs)} q_send_buf_xy[2*D#{a1}][2*D#{a2}][#{length qs}];
-  #{snd (head qs)} q_recv_buf_x[2*D#{a1}][L#{a2}][#{length qs}];
-  #{snd (head qs)} q_recv_buf_y[L#{a1}][2*D#{a2}][#{length qs}];
-  #{snd (head qs)} q_recv_buf_xy[2*D#{a1}][2*D#{a2}][#{length qs}];
+  static #{snd (head qs)} q_send_buf_x[2*D#{a1}][L#{a2}][#{length qs}];
+  static #{snd (head qs)} q_send_buf_y[L#{a1}][2*D#{a2}][#{length qs}];
+  static #{snd (head qs)} q_send_buf_xy[2*D#{a1}][2*D#{a2}][#{length qs}];
+  static #{snd (head qs)} q_recv_buf_x[2*D#{a1}][L#{a2}][#{length qs}];
+  static #{snd (head qs)} q_recv_buf_y[L#{a1}][2*D#{a2}][#{length qs}];
+  static #{snd (head qs)} q_recv_buf_xy[2*D#{a1}][2*D#{a2}][#{length qs}];
+
+  static Formura_Param p;
 
   for(int ix = 0; ix < 2*D#{a1}; ix++) {
     for(int iy = 0; iy < 2*D#{a2}; iy++) {
