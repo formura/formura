@@ -102,7 +102,7 @@ convertConfig s nc = check ic
           , _icMPIShape = nc ^. ncMPIShape
           }
     check :: InternalConfig -> Either ConfigException InternalConfig
-    check cfg | any (<1) (cfg ^. icLengthPerNode) = Left $ ConfigException "the element of length_per_node should be a positive number"
+    check cfg | any (<0) (cfg ^. icLengthPerNode) = Left $ ConfigException "the element of length_per_node should be a positive number"
               | any (<1) (cfg ^. icGridPerNode) = Left $ ConfigException "the element of grid_per_node should be a positive integer"
               | any (<1) (cfg ^. icGridPerBlock) = Left $ ConfigException "the element of grid_per_block should be a positive integer"
               | any (<1) (cfg ^. icMPIShape) = Left $ ConfigException "the element of mpi_shape should be a positive integer"
