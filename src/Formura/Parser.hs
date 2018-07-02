@@ -81,6 +81,7 @@ keywordSet = S.fromList
                ["begin", "end", "function", "returns", "let", "in", "fun"
                , "dimension", "axes", "if", "then", "else", "const", "extern", "manifest"
                , "+", "-", "*", "/", ".", "**", "::", "=", ","
+               , "&&", "||"
                ]
            <> minMaxOperatorNames
            <> comparisonOperatorNames
@@ -205,6 +206,8 @@ exprOf termParser = X.buildExpressionParser tbl termParser
           , [binary "*" (Binop "*") X.AssocLeft, binary "/" (Binop "/") X.AssocLeft]
           , [unary "+" (Uniop "+") , unary "-" (Uniop "-")]
           , [binary "+" (Binop "+") X.AssocLeft, binary "-" (Binop "-") X.AssocLeft]
+          , [binary "&&" (Binop "&&") X.AssocLeft]
+          , [binary "||" (Binop "||") X.AssocLeft]
           , [binary sym (catNary sym) X.AssocLeft | sym <- S.toList minMaxOperatorNames]
           , [binary sym (Binop sym) X.AssocNone | sym <- S.toList comparisonOperatorNames]
           ]
