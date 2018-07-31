@@ -15,3 +15,34 @@ The syntax of Formura is kept simple, so that you can easily learn and write sim
 
 
 Note: The originary repo is <https://github.com/nushio3/formura>.
+
+# Quick Start
+
+OS: Ubuntu 18.04
+
+## Preparation for compiling Formura
+
+```
+apt install build-essential git mpi-default-dev libtinfo-dev
+wget -qO- https://get.haskellstack.org/ | sh # installation of the Haskell tool Stack
+```
+
+## Compile Formura
+
+```
+git clone git@github.com:formura/formura.git
+cd formura
+stack build
+```
+
+Add the path of the binary execution file of Formura to the `$PATH` variable of your shell.
+The path of the binary execution file is, for example, `${HOME}/.stack-work/install/x86_64-linux/lts-10.4/8.2.2/bin/`.
+
+
+## Execute examples
+
+```
+cd formura/examples/diffusion1
+make
+make run
+```
