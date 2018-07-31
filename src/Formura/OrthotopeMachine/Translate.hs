@@ -20,6 +20,7 @@ import           Control.Monad
 import "mtl"     Control.Monad.Reader hiding (fix)
 import           Data.Foldable
 import qualified Data.Map as M
+import           Data.Maybe (isNothing)
 import           Data.Ratio
 import qualified Data.Set as S
 import           System.Exit
@@ -618,6 +619,20 @@ genOMProgram fprog = do
     bs99 <- matchToLhs lhsOfStep stepType
     return $ M.fromList bs99
 
+  stFilterGraph <- if isNothing (fprog ^. programNumericalConfig . ncFilterInterval)
+                      then return mempty
+                      else do
+                        (_, stFilter, _) <- run $ do
+                          setupGlobalEnvironment fprog
+                          filterFunDef <- lookupToplevelIdents fprog "filter"
+                          filterType <- genGlobalFunction gbinds initType lhsOfStep filterFunDef
+                          when (initType /= filterType) $
+                            raiseErr $ failed $ "the return type of step : " ++ show filterType ++ "\n" ++
+                              "must match the return type of init : " ++ show initType
+                          bs99 <- matchToLhs lhsOfStep filterType
+                          return $ M.fromList bs99
+                        return (stFilter ^. theGraph)
+
   let sleeve = calcSleeve (stStep ^. theGraph)
   case convertConfig sleeve (fprog ^. programNumericalConfig) of
     Left err -> die $ "Error: " ++ displayException err
@@ -625,6 +640,7 @@ genOMProgram fprog = do
       return MachineProgram
         { _omGlobalEnvironment = (stInit ^. globalEnvironment) & envNumericalConfig .~ cfg
         , _omInitGraph = stInit ^. theGraph
+        , _omFilterGraph = stFilterGraph
         , _omStepGraph = stStep ^. theGraph
         , _omStateSignature = stateSignature0
         }

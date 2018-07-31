@@ -11,6 +11,7 @@ import           Data.Bifunctor (first)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Data
+import           Data.Maybe
 import           Data.Scientific
 import           Data.Text.Lens (packed)
 import qualified Data.Yaml as Y
@@ -24,10 +25,10 @@ data NumericalConfig = NumericalConfig
   , _ncGridPerBlock :: Vec Int
   , _ncTemporalBlockingInterval :: Int
   , _ncMPIShape :: Vec Int
+  , _ncFilterInterval :: Maybe Int
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
 
 makeClassy ''NumericalConfig
-
 
 $(deriveJSON (let toSnake = packed %~ snakify
               in defaultOptions { fieldLabelModifier = toSnake . drop 3
@@ -53,6 +54,7 @@ decodeConfig str = check =<< first ConfigException (Y.decodeEither str)
               | null (cfg ^. ncGridPerBlock) = Left $ ConfigException "grid_per_block should be a nonempty list"
               | null (cfg ^. ncMPIShape) = Left $ ConfigException "mpi_shape should be a nonempty list"
               | (cfg ^. ncTemporalBlockingInterval) < 1 = Left $ ConfigException "temporal_blocking_interval should be a positive integer"
+              | (fromMaybe 1 (cfg ^. ncFilterInterval)) < 1 = Left $ ConfigException "filter_interval should be a positive integer"
               | otherwise = Right cfg
 
 readConfig :: FilePath -> IO NumericalConfig
@@ -63,6 +65,7 @@ readConfig fn = do
     Right cfg -> return cfg
 
 -- Config for code generation
+-- FIX: updateとfilterの袖サイズの違いからくるoffsetをいれる
 data InternalConfig = InternalConfig
   { _icLengthPerNode :: Vec Scientific
   , _icGridPerNode :: Vec Int
@@ -71,6 +74,7 @@ data InternalConfig = InternalConfig
   , _icTemporalBlockingInterval :: Int
   , _icSleeve :: Int
   , _icMPIShape :: Vec Int
+  , _icFilterInterval :: Maybe Int
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
 
 makeClassy ''InternalConfig
@@ -84,11 +88,13 @@ defaultInternalConfig = InternalConfig
   , _icTemporalBlockingInterval = 1
   , _icSleeve = 1
   , _icMPIShape = Vec []
+  , _icFilterInterval = Nothing
   }
 
 convertConfig :: Int -> NumericalConfig -> Either ConfigException InternalConfig
 convertConfig s nc = check ic
   where
+    -- FIX: filterとupdateのうち大きいほうの袖サイズで決定する
     totalGrids = (nc ^. ncGridPerNode) + pure (2*s*(nc ^. ncTemporalBlockingInterval))
     ms = liftVec2 (div) totalGrids (nc ^. ncGridPerBlock)
     ms' = liftVec2 (mod) totalGrids (nc ^. ncGridPerBlock)
@@ -100,6 +106,7 @@ convertConfig s nc = check ic
           , _icTemporalBlockingInterval = nc ^. ncTemporalBlockingInterval
           , _icSleeve = s
           , _icMPIShape = nc ^. ncMPIShape
+          , _icFilterInterval = nc ^. ncFilterInterval
           }
     check :: InternalConfig -> Either ConfigException InternalConfig
     check cfg | any (<0) (cfg ^. icLengthPerNode) = Left $ ConfigException "the element of length_per_node should be a positive number"
@@ -107,6 +114,7 @@ convertConfig s nc = check ic
               | any (<1) (cfg ^. icGridPerBlock) = Left $ ConfigException "the element of grid_per_block should be a positive integer"
               | any (<1) (cfg ^. icMPIShape) = Left $ ConfigException "the element of mpi_shape should be a positive integer"
               | any (/=0) ms' = Left $ ConfigException "Inconsistent config"
+              | (fromMaybe 0 (cfg ^. icFilterInterval)) `mod` (cfg ^. icTemporalBlockingInterval) /= 0 = Left $ ConfigException "filter_interval should be a multiple of temporal_blocking_interval"
               | otherwise = Right cfg
 
 nbuSize :: String -> InternalConfig -> Int
