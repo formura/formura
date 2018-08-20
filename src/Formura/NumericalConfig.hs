@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TemplateHaskell    #-}
+{-# LANGUAGE TypeApplications    #-}
 
 module Formura.NumericalConfig where
 
@@ -11,6 +12,7 @@ import           Data.Bifunctor (first)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Data
+import           Data.Foldable (toList)
 import           Data.Scientific
 import           Data.Text.Lens (packed)
 import qualified Data.Yaml as Y
@@ -63,27 +65,35 @@ readConfig fn = do
     Right cfg -> return cfg
 
 -- Config for code generation
+data BlockingType = NoBlocking
+                  | TemporalBlocking
+  deriving (Eq, Ord, Read, Show, Typeable, Data)
+
 data InternalConfig = InternalConfig
-  { _icLengthPerNode :: Vec Scientific
-  , _icGridPerNode :: Vec Int
-  , _icBlockPerNode :: Vec Int
-  , _icGridPerBlock :: Vec Int
+  { _icLengthPerNode :: [Scientific]
+  , _icGridPerNode :: [Int]
+  , _icBlockPerNode :: [Int]
+  , _icGridPerBlock :: [Int]
+  , _icSpaceInterval :: [Double]
+  , _icBlockingType :: BlockingType
   , _icTemporalBlockingInterval :: Int
   , _icSleeve :: Int
-  , _icMPIShape :: Vec Int
+  , _icMPIShape :: [Int]
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
 
 makeClassy ''InternalConfig
 
 defaultInternalConfig :: InternalConfig
 defaultInternalConfig = InternalConfig
-  { _icLengthPerNode = Vec []
-  , _icGridPerNode = Vec []
-  , _icBlockPerNode = Vec []
-  , _icGridPerBlock = Vec []
+  { _icLengthPerNode = []
+  , _icGridPerNode = []
+  , _icSpaceInterval = []
+  , _icBlockPerNode = []
+  , _icGridPerBlock = []
   , _icTemporalBlockingInterval = 1
+  , _icBlockingType = NoBlocking
   , _icSleeve = 1
-  , _icMPIShape = Vec []
+  , _icMPIShape = []
   }
 
 convertConfig :: Int -> NumericalConfig -> Either ConfigException InternalConfig
@@ -93,13 +103,15 @@ convertConfig s nc = check ic
     ms = liftVec2 (div) totalGrids (nc ^. ncGridPerBlock)
     ms' = liftVec2 (mod) totalGrids (nc ^. ncGridPerBlock)
     ic = InternalConfig
-          { _icLengthPerNode = nc ^. ncLengthPerNode
-          , _icGridPerNode = nc ^. ncGridPerNode
-          , _icBlockPerNode = ms
-          , _icGridPerBlock = nc ^. ncGridPerBlock
+          { _icLengthPerNode = toList $ nc ^. ncLengthPerNode
+          , _icGridPerNode = toList $ nc ^. ncGridPerNode
+          , _icSpaceInterval = toList $ (fmap (toRealFloat @Double) $ nc ^. ncLengthPerNode) / (fmap fromIntegral $ nc ^. ncGridPerNode)
+          , _icBlockPerNode = toList $ ms
+          , _icGridPerBlock = toList $ nc ^. ncGridPerBlock
           , _icTemporalBlockingInterval = nc ^. ncTemporalBlockingInterval
+          , _icBlockingType = NoBlocking
           , _icSleeve = s
-          , _icMPIShape = nc ^. ncMPIShape
+          , _icMPIShape = toList $ nc ^. ncMPIShape
           }
     check :: InternalConfig -> Either ConfigException InternalConfig
     check cfg | any (<0) (cfg ^. icLengthPerNode) = Left $ ConfigException "the element of length_per_node should be a positive number"

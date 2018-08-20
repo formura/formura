@@ -5,7 +5,6 @@ module Formura.Generator.Encode where
 import Control.Lens
 import Data.List
 import Formura.Generator.Types
-import Formura.Vec
 
 render :: CodeStructure -> (String, String)
 render cs = (hContent, cContent)
@@ -53,9 +52,6 @@ class Encode a where
 
 instance Encode [Int] where
   encode ns = concat ["[" ++ show n ++ "]" | n <- ns]
-
-instance Encode (Vec Int) where
-  encode (Vec ns) = concat ["[" ++ show n ++ "]" | n <- ns]
 
 instance Encode CVariable where
   encode (CVariable n t mv ml) = let with (Just l) s = l <+> s

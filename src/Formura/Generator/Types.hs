@@ -17,13 +17,11 @@ import Control.Monad.Writer
 import Formura.OrthotopeMachine.Graph
 import Formura.Vec
 
-data BlockingType = NoBlocking
-
 data CType = CVoid
            | CInt
            | CFloat
            | CDouble
-           | CArray (Vec Int) CType
+           | CArray [Int] CType
            | CStruct String [(String, CType)]
            | CPtr CType
            | CRawType String
@@ -32,8 +30,8 @@ data CTypedef = CTypedef CType String
               | CTypedefStruct [(String, CType)] String
 
 data Kind = Normal
-          | AoS (Vec Int)
-          | SoA (Vec Int)
+          | AoS [Int]
+          | SoA [Int]
 
 data CVariable = CVariable
   { variableName :: String

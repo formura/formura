@@ -1,12 +1,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeApplications #-}
 module Formura.Generator.Templates where
 
 import Control.Lens ((^.), view)
 import qualified Data.Map as M
 import Data.Monoid
-import Data.Scientific
 
 import Formura.NumericalConfig
 import Formura.OrthotopeMachine.Graph
@@ -14,7 +12,6 @@ import Formura.GlobalEnvironment
 import Formura.Generator.Types
 import Formura.Generator.Functions
 import Formura.Syntax
-import Formura.Vec
 
 scaffold :: GenM ()
 scaffold = do
@@ -40,8 +37,7 @@ scaffold = do
   gridStruct <- mkFields <$> view omStateSignature
   gridStructType <- defGlobalTypeStruct "Formura_Grid_Struct" gridStruct (SoA gridPerNode)
 
-  let lengthPerNode = ic ^. icLengthPerNode
-  let (Vec spaceIntervals) = (fmap (toRealFloat @Double) lengthPerNode) / (fmap fromIntegral gridPerNode)
+  let spaceIntervals = ic ^. icSpaceInterval
   sequence_ [declGlobalVariable CDouble ("d" ++ a) (Just $ show d) | (a,d) <- zip axes spaceIntervals]
   globalData <- declGlobalVariable gridStructType "formura_data" Nothing
   
@@ -62,8 +58,8 @@ initBody = do
   raw "MPI_Comm_rank(comm, &rank)"
   -- TODO: Formura_Decode_rank 関数の呼び出し
   axes <- view (omGlobalEnvironment . axesNames)
-  (Vec gridPerNode) <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
-  (Vec lengthPerNode) <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
+  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
+  lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
   dim <- view (omGlobalEnvironment . dimension)
   -- こんな感じで人力でやるのもバカらしいので改善する
   let ranksTable = undefined
@@ -96,7 +92,7 @@ noBlocking :: [(String, CType)] -> CVariable -> BuildM GenM (CType, CType)
 noBlocking gridStruct globalData = do
   s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
-  buffType <- defLocalTypeStruct "Formura_Buff" gridStruct (SoA $ gridPerNode + pure (2*s))
+  buffType <- defLocalTypeStruct "Formura_Buff" gridStruct (SoA $ map (+ (2*s)) gridPerNode)
   rsltType <- defLocalTypeStruct "Formura_Rslt" gridStruct (SoA gridPerNode)
   buff <- declLocalVariable (Just "static") buffType "buff" Nothing
   rslt <- declLocalVariable (Just "static") rsltType "rslt" Nothing
