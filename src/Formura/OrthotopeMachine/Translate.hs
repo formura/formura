@@ -89,7 +89,7 @@ setupGlobalEnvironment prog = do
     [] -> raiseErr $ failed "no axes declaration found."
     _  -> raiseErr $ failed "multiple axes declaration found."
   dimension .= dim
-  axesNames .= Vec axs
+  axesNames .= axs
   where
     spDecls = prog ^. programSpecialDeclarations
 

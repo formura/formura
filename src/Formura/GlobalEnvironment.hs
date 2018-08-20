@@ -6,15 +6,14 @@ import Control.Lens
 
 import Formura.NumericalConfig
 import Formura.Syntax
-import Formura.Vec
 
 data GlobalEnvironment = GlobalEnvironment
   { _dimension :: Int
-  , _axesNames :: Vec IdentName
+  , _axesNames :: [IdentName]
   , _envNumericalConfig :: InternalConfig
   } deriving (Eq, Ord, Show)
 
 makeClassy ''GlobalEnvironment
 
 defaultGlobalEnvironment :: GlobalEnvironment
-defaultGlobalEnvironment = GlobalEnvironment 0 (Vec []) defaultInternalConfig
+defaultGlobalEnvironment = GlobalEnvironment 0 [] defaultInternalConfig

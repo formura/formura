@@ -6,15 +6,11 @@
 module Formura.Generator where
 
 import Control.Lens hiding (op)
-import Data.Char (toUpper, toLower)
+import Data.Char (toLower)
 import Data.Foldable (toList)
 import Data.List (isPrefixOf, stripPrefix)
 import qualified Data.Map as M
-import Data.Scientific
-import qualified Data.Text.Lazy.IO as T
 import System.Directory
-import Text.Heterocephalus (compileTextFile)
-import Text.Blaze.Renderer.Text (renderMarkup)
 import Text.Printf
 
 import Formura.CommandLineOption

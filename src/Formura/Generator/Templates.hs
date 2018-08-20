@@ -3,14 +3,10 @@
 {-# LANGUAGE TypeApplications #-}
 module Formura.Generator.Templates where
 
-import Control.Lens
-import Control.Monad
-import Control.Monad.Reader
+import Control.Lens ((^.), view)
 import qualified Data.Map as M
 import Data.Monoid
-import Data.Ratio
 import Data.Scientific
-import Data.Traversable
 
 import Formura.NumericalConfig
 import Formura.OrthotopeMachine.Graph
@@ -24,7 +20,7 @@ scaffold :: GenM ()
 scaffold = do
   dim <- view (omGlobalEnvironment . dimension)
   ic <- view (omGlobalEnvironment . envNumericalConfig)
-  (Vec axes) <- view (omGlobalEnvironment . axesNames)
+  axes <- view (omGlobalEnvironment . axesNames)
 
   addHeader "<stdio.h>"
   addHeader "<stdbool.h>"
@@ -65,7 +61,7 @@ initBody = do
   raw "MPI_Comm_size(comm, &size)"
   raw "MPI_Comm_rank(comm, &rank)"
   -- TODO: Formura_Decode_rank 関数の呼び出し
-  (Vec axes) <- view (omGlobalEnvironment . axesNames)
+  axes <- view (omGlobalEnvironment . axesNames)
   (Vec gridPerNode) <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   (Vec lengthPerNode) <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
   dim <- view (omGlobalEnvironment . dimension)
