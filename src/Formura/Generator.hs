@@ -19,6 +19,9 @@ import Text.Printf
 
 import Formura.CommandLineOption
 import Formura.GlobalEnvironment
+import Formura.Generator.Encode
+import Formura.Generator.Types
+import Formura.Generator.Templates
 import Formura.NumericalConfig
 import Formura.OrthotopeMachine.Graph
 import Formura.Syntax
@@ -26,38 +29,57 @@ import Formura.Vec
 
 genCode :: WithCommandLineOption => MMProgram -> IO ()
 genCode mm = do
-  let dim = mm ^. omGlobalEnvironment . dimension
-      axes = map (map toUpper) $ toList $ mm ^. omGlobalEnvironment . axesNames
-      ic = mm ^. omGlobalEnvironment . envNumericalConfig
+  let ic = mm ^. omGlobalEnvironment . envNumericalConfig
+  let totalMPI = product $ ic ^. icMPIShape
 
-  let withAxes :: Vec a -> [(String,a)]
-      withAxes = zip axes . toList
+  let cs = generate mm hxxFilePath cxxFilePath scaffold
+      (hContent, cContent) = render cs
 
-  let mpishape = withAxes $ ic ^. icMPIShape
-      totalMPI = product $ toList $ ic ^. icMPIShape
-      lengthPerNode = withAxes $ fmap (toRealFloat @Double) $ ic ^. icLengthPerNode
-      gridPerBlock = withAxes $ ic ^. icGridPerBlock
-      blockPerNode = withAxes $ ic ^. icBlockPerNode
-      gridPerNode = withAxes $ ic ^. icGridPerNode
-      globalSize = concat [printf "[N%s*M%s]" a a | a <- axes] :: String
-      ranks = mkRanks dim
-      qs = mkIdents $ mm ^. omStateSignature
-      nqs = zip [0..] $ map fst qs :: [(Int,String)]
-      step = mkStep axes $ mm ^. omStepGraph
-      with_simd = False
   let runningScriptPath = "run"
   genRunningScript runningScriptPath totalMPI
-  T.writeFile hxxFilePath $ renderMarkup $(compileTextFile "templates/cpu.h")
-  T.writeFile cxxFilePath $ renderMarkup $ case dim of
-    1 -> let [a1] = axes in $(compileTextFile "templates/cpu-1d.c")
-    2 -> let [a1,a2] = axes in $(compileTextFile "templates/cpu-2d.c")
-    3 -> let [a1,a2,a3] = axes in $(compileTextFile "templates/cpu-3d.c")
-    _ -> error "Not support"
+
+  writeFile hxxFilePath hContent
+  writeFile cxxFilePath cContent
   putStr . unlines $ [ "Generate:"
                      , "  " ++ cxxFilePath
                      , "  " ++ hxxFilePath
                      , "  " ++ runningScriptPath
                      ]
+
+-- genCode :: WithCommandLineOption => MMProgram -> IO ()
+-- genCode mm = do
+--   let dim = mm ^. omGlobalEnvironment . dimension
+--       axes = map (map toUpper) $ toList $ mm ^. omGlobalEnvironment . axesNames
+--       ic = mm ^. omGlobalEnvironment . envNumericalConfig
+
+--   let withAxes :: Vec a -> [(String,a)]
+--       withAxes = zip axes . toList
+
+--   let mpishape = withAxes $ ic ^. icMPIShape
+--       totalMPI = product $ toList $ ic ^. icMPIShape
+--       lengthPerNode = withAxes $ fmap (toRealFloat @Double) $ ic ^. icLengthPerNode
+--       gridPerBlock = withAxes $ ic ^. icGridPerBlock
+--       blockPerNode = withAxes $ ic ^. icBlockPerNode
+--       gridPerNode = withAxes $ ic ^. icGridPerNode
+--       globalSize = concat [printf "[N%s*M%s]" a a | a <- axes] :: String
+--       ranks = mkRanks dim
+--       qs = mkIdents $ mm ^. omStateSignature
+--       nqs = zip [0..] $ map fst qs :: [(Int,String)]
+--       step = mkStep axes $ mm ^. omStepGraph
+--       with_simd = False
+--   let runningScriptPath = "run"
+--   genRunningScript runningScriptPath totalMPI
+--   T.writeFile hxxFilePath $ renderMarkup $(compileTextFile "templates/cpu.h")
+--   T.writeFile cxxFilePath $ renderMarkup $ case dim of
+--     1 -> let [a1] = axes in $(compileTextFile "templates/cpu-1d.c")
+--     2 -> let [a1,a2] = axes in $(compileTextFile "templates/cpu-2d.c")
+--     3 -> let [a1,a2,a3] = axes in $(compileTextFile "templates/cpu-3d.c")
+--     _ -> error "Not support"
+--   putStr . unlines $ [ "Generate:"
+--                      , "  " ++ cxxFilePath
+--                      , "  " ++ hxxFilePath
+--                      , "  " ++ runningScriptPath
+--                      ]
 
 mkRanks :: Int -> [String]
 mkRanks d | d == 1 = [ "p1", "m1" ]
