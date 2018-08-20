@@ -15,7 +15,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 
 import Formura.OrthotopeMachine.Graph
-import Formura.Vec
 
 data CType = CVoid
            | CInt
