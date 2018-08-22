@@ -4,6 +4,8 @@ module Formura.Generator.Encode where
 
 import Control.Lens
 import Data.List
+import Text.Printf
+
 import Formura.Generator.Types
 
 render :: CodeStructure -> (String, String)
@@ -45,7 +47,7 @@ instance EncodeH CTypedef where
   encodeH (CTypedefStruct fs t) = "typedef struct {\n" ++ unlines [encode (CVariable n t Nothing Nothing) | (n,t) <- fs] ++  "}" <+| t
 
 instance EncodeH CFunction where
-  encodeH (CFunction fn rt ag _) = encode rt <+> fn ++ "(" ++ (intercalate "," $ map (encode . fst) ag) ++ ");"
+  encodeH (CFunction fn rt ag _) = encode rt <+> fn ++ parens (map (encode . fst) ag) ++ ";"
 
 class Encode a where
   encode :: a -> String
@@ -67,7 +69,7 @@ instance Encode CTypedef where
   encode = encodeH
 
 instance Encode CFunction where
-  encode (CFunction fn rt ag b) = encode rt <+> fn ++ "(" ++ (intercalate "," [encode t <+> n | (t,n) <- ag]) ++ ") {\n"
+  encode (CFunction fn rt ag b) = encode rt <+> fn ++ parens [encode t <+> n | (t,n) <- ag] ++ " {\n"
                                 ++ unlines (map encode b)
                                 ++ "}"
 
@@ -82,7 +84,14 @@ instance Encode CType where
   encode (CRawType n) = n
 
 instance Encode CStatement where
-  encode Copy = "copy"
-  encode Sendrecv = "sendrecv"
-  encode Call = "call"
-  encode Raw = "raw"
+  encode (Decl v) = encode v
+  encode (Bind lhs rhs) = lhs <+> "=" <+| rhs
+  encode (Loop idx body) = foldr (\(n,i0,i1,di) acc -> printf "for(int %s = %d; %s < %d; %s += %d) {\n%s}\n" n i0 n i1 n di acc) (unlines $ map encode body) idx
+  encode (Call fn args) = fn ++ parens args ++ ";"
+  encode (Raw c) = c ++ ";"
+
+parens :: [String] -> String
+parens xs = "(" ++ intercalate "," xs ++ ")"
+
+braces :: String -> String
+braces body = "{" ++ body ++ "}"

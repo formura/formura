@@ -3,7 +3,9 @@
 module Formura.Generator.Functions where
 
 import Control.Lens
+import Control.Monad.Trans
 import Control.Monad.Writer
+import Text.Printf
 
 import Formura.Generator.Types
 import Formura.Generator.Encode
@@ -57,7 +59,7 @@ declGlobalVariable  t n mv = do
 declLocalVariable :: IsGen m => Maybe String -> CType -> String -> Maybe String -> BuildM m CVariable
 declLocalVariable ml t n mv = do
   let v = CVariable n t mv ml
-  raw (encode v)
+  tell [Decl v]
   return v
 
 defGlobalFunction :: IsGen m => String -> [(CType, String)] -> CType -> BuildM m a -> m a
@@ -72,26 +74,78 @@ defFunction setter name args rt body = do
   setter %= (++ [CFunction name rt args stmts])
   return res
 
+loop :: IsGen m => [Int] -> ([String] -> BuildM m ()) -> BuildM m ()
+loop size body = do
+  let idxNames = ["i" ++ show i | i <- [1..(length size)]]
+  let idx = [(n, 0, s, 1) | (n,s) <- zip idxNames size]
+  (_, stmt) <- lift $ build $ body idxNames
+  tell [Loop idx stmt]
+  return ()
+
+getSize :: CVariable -> [Int]
+getSize (CVariable _ t _ _) =
+  case t of
+    (CArray s (CStruct _ _)) -> s
+    (CStruct _ ((_,(CArray s _)):_)) -> s
+    _ -> error "Error at Formura.Generator.Functions.getSize"
+
+getFields :: CVariable -> [String]
+getFields (CVariable _ t _ _) =
+  case t of
+    (CArray _ (CStruct _ fs)) -> map fst fs
+    (CStruct _ fs) -> map fst fs
+    _ -> error "Error at Formura.Generator.Functions.getFields"
+
+mkIdent :: String -> CVariable -> [String] -> [Int] -> String
+mkIdent f (CVariable n t _ _) idx offset
+  | isSoA t = n ++ "." ++ f ++ mkIdx idx offset
+  | isSoA' t = n ++ "->" ++ f ++ mkIdx idx offset
+  | isAoS t = n ++ mkIdx idx offset ++ "." ++ f
+  | otherwise = error "Error at Formura.Generator.Functions.mkIdent"
+  where
+    isArray (CArray _ _) = True
+    isArray _ = False
+    isSoA (CStruct _ fs) = all (isArray . snd) fs
+    isSoA _ = False
+    isSoA' (CPtr t) = isSoA t
+    isAoS (CArray _ (CStruct _ _)) = True
+    isAoS _ = False
+    show' x = if x == 0 then "" else printf "%+d" x
+    mkIdx is os = concat ["[" ++ i ++ show' o ++ "]" | (i,o) <- zip is os]
+
+(@=) :: String -> String -> CStatement
+l @= r = Bind l r
+
+infixl 1 @=
+
 copy :: IsGen m => CVariable -> CVariable -> [Int] -> [Int] -> BuildM m ()
 copy src tgt srcOffset tgtOffset = do
-  tell [Copy]
+  let s = zipWith min (getSize src) (getSize tgt)
+  loop s $ \idx -> do
+    let fs = getFields src
+    tell [mkIdent f tgt idx tgtOffset @= mkIdent f src idx srcOffset | f <- fs, f `elem` (getFields tgt)]
   return ()
 
 sendrecv :: IsGen m => CVariable -> Int -> BuildM m CVariable
 sendrecv v s = do
-  tell [Sendrecv]
-  -- FIX ME
   return v
 
 call :: IsGen m => String -> [String] -> BuildM m ()
 call fn args = do
-  tell [Call]
+  tell [Call fn args]
   return ()
 
 ref :: CVariable -> String
-ref = undefined
+ref (CVariable n t _ _) | isArray t = n
+                        | isPtr t = n
+                        | otherwise = "&" ++ n
+  where
+    isArray (CArray _ _) = True
+    isArray _ = False
+    isPtr (CPtr _) = True
+    isPtr _ = False
 
 raw :: IsGen m => String -> BuildM m ()
 raw c = do
-  tell [Raw]
+  tell [Raw c]
   return ()

@@ -10,6 +10,7 @@
 module Formura.Generator.Types where
 
 import Control.Lens
+import Control.Monad.Trans
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -39,10 +40,11 @@ data CVariable = CVariable
   , variableLifetime :: Maybe String
   }
 
-data CStatement = Copy
-                | Sendrecv
-                | Call
-                | Raw
+data CStatement = Decl CVariable
+                | Bind String String
+                | Loop [(String,Int,Int,Int)] [CStatement]
+                | Call String [String]
+                | Raw String
 
 data CFunction = CFunction
   { functionName :: String
@@ -77,9 +79,9 @@ newtype BuildM m a = BuildM { unwrapBuildM :: WriterT [CStatement] m a }
 deriving instance MonadReader MMProgram m => MonadReader MMProgram (BuildM m)
 deriving instance MonadState CodeStructure m => MonadState CodeStructure (BuildM m)
 deriving instance Monad m => MonadWriter [CStatement] (BuildM m)
+deriving instance MonadTrans BuildM
 
 build :: IsGen m => BuildM m a -> m (a, [CStatement])
 build = runWriterT . unwrapBuildM
 
 type IsGen m = (MonadReader MMProgram m, MonadState CodeStructure m)
-

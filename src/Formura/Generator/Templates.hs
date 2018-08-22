@@ -120,6 +120,7 @@ calcSizes = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) a
                                                     in  (n0+s'):acc
             go _ acc = acc
 
+-- TODO: FIX ME
 mkStep :: [String] -> MMGraph -> String
 mkStep axes mmg = withTmp $ unlines [ genMMInst omid $ if isVoid omt then mm else insertMNStore omid mm | (omid, (Node mm omt _)) <- M.toAscList mmg ]
   where
