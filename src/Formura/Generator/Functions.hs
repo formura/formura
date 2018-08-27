@@ -9,6 +9,7 @@ import Data.List (intercalate)
 import Data.Traversable (for)
 import Text.Printf
 
+import Formura.NumericalConfig
 import Formura.GlobalEnvironment
 import Formura.OrthotopeMachine.Graph
 import Formura.Generator.Types
@@ -112,6 +113,7 @@ mkIdent f (CVariable n t _ _) idx offset
     isSoA (CStruct _ fs) = all (isArray . snd) fs
     isSoA _ = False
     isSoA' (CPtr t) = isSoA t
+    isSoA' _ = False
     isAoS (CArray _ (CStruct _ _)) = True
     isAoS _ = False
     show' x = if x == 0 then "" else printf "%+d" x
@@ -139,19 +141,20 @@ formatRank b = intercalate "_" [f i | i <- b]
 sendrecv :: IsGen m => [(String,CType)] -> CVariable -> CVariable -> Int -> BuildM m ()
 sendrecv gridStruct src tgt s = do
   bases <- view (omGlobalEnvironment . commBases)
+  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   commType <- defLocalTypeStruct "Formura_Comm_Buf" gridStruct Normal
   (sendReqs, recvReqs, recvBufs) <- fmap unzip3 $ for bases $ \b -> do
     let r = formatRank b
-    sendbuf <- declLocalVariable (Just "static") (CArray [] commType) ("send_buf_" ++ r) Nothing
-    copy src sendbuf [] []
+    sendbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("send_buf_" ++ r) Nothing
+    copy src sendbuf [if d == 1 then n-2*s else 0 | (d,n) <- zip b gridPerNode] (repeat 0)
     sendReq <- sendTo r sendbuf
     let r' = formatRank $ map negate b
-    recvbuf <- declLocalVariable (Just "static") (CArray [] commType) ("recv_buf_" ++ r') Nothing
+    recvbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("recv_buf_" ++ r') Nothing
     recvReq <- recvFrom r' recvbuf
     return (sendReq, recvReq, recvbuf)
   mapM_ wait sendReqs
   mapM_ wait recvReqs
-  sequence_ [copy recvBuf tgt [] [] | (b,recvBuf) <- zip bases recvBufs]
+  sequence_ [copy recvBuf tgt (repeat 0) [if d == 1 then 0 else 2*s | (d,n) <- zip b gridPerNode] | (b,recvBuf) <- zip bases recvBufs]
 
 sendTo :: IsGen m => String -> CVariable -> BuildM m CVariable
 sendTo r v = do

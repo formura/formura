@@ -105,11 +105,11 @@ noBlocking gridStruct globalData = do
   -- 通信
   sendrecv gridStruct globalData buff s
 
-  copy globalData buff [] []
+  copy globalData buff (repeat (2*s)) (repeat 0)
   -- 1ステップ更新
   call "Formura_Step" [ref buff, ref rslt]
   -- 結果の書き出し
-  copy rslt globalData [] []
+  copy rslt globalData (repeat 0) (repeat 0)
   -- time_step を更新
   raw "n->time_step += 1"
   return (buffType, rsltType)
