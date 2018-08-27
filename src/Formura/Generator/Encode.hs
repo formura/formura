@@ -17,7 +17,7 @@ render cs = (hContent, cContent)
                       ++ encodesWith encodeH globalVariables
                       ++ encodesWith encodeH globalFunctions
 
-    cContent = unlines $ ["#include" <+> cs ^. hFileName]
+    cContent = unlines $ ["#include" <+> show (cs ^. hFileName)]
                       ++ encodesWith encode globalTypes
                       ++ encodesWith encode localTypes
                       ++ encodesWith encode globalVariables
