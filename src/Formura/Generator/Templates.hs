@@ -66,15 +66,22 @@ initBody = do
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
   dim <- view (omGlobalEnvironment . dimension)
-  let rankConv x | x == 0 = ("0","")
-                 | x == 1 = ("p1","+1")
-                 | x == -1 = ("m1","-1")
-  let ranksTable | dim == 1 = [ (r,"(i1" ++ a ++ ")") | x <- [1,-1], let (r,a) = rankConv x]
-                 | dim == 2 = [(r1 ++ "_" ++ r2, "(i1"++a1 ++ ",i2" ++ a2 ++ ")") | (x,y) <- [(1,0), (-1,0), (0,1), (0,-1), (1,1), (-1,-1)],let (r1,a1) = rankConv x, let (r2,a2) = rankConv y]
-                 | dim == 3 = [(r1 ++ "_" ++ r2 ++ "_" ++ r3, "(i1"++a1++",i2"++a2++",i3"++a3++")") | (x,y,z) <- [(1,0,0), (-1,0,0), (0,1,0), (0,-1,0), (0,0,1), (0,0,-1), (1,1,0), (-1,-1,0), (1,0,1), (-1,0,-1), (0,1,1), (0,-1,-1), (1,1,1), (-1,-1,-1)], let (r1,a1) = rankConv x, let (r2,a2) = rankConv y, let (r3,a3) = rankConv z]
-                 | otherwise = error "Not support"
+  bases <- view (omGlobalEnvironment . commBases)
+  let rs = bases ++ [map negate b | b <- bases]
+      r2a x | x == 0 = ""
+            | x == 1 = "+1"
+            | x == -1 = "-1"
+      rank2arg r = "(" ++ intercalate "," ["i" ++ show i ++ r2a x | (i,x) <- zip [1..length r] r] ++ ")"
+      ranksTable = [(formatRank r,rank2arg r) | r <- rs ]
+  -- let rankConv x | x == 0 = ("0","")
+  --                | x == 1 = ("p1","+1")
+  --                | x == -1 = ("m1","-1")
+  -- let ranksTable | dim == 1 = [ (r,"(i1" ++ a ++ ")") | x <- [1,-1], let (r,a) = rankConv x]
+  --                | dim == 2 = [(r1 ++ "_" ++ r2, "(i1"++a1 ++ ",i2" ++ a2 ++ ")") | (x,y) <- [(1,0), (-1,0), (0,1), (0,-1), (1,1), (-1,-1)],let (r1,a1) = rankConv x, let (r2,a2) = rankConv y]
+  --                | dim == 3 = [(r1 ++ "_" ++ r2 ++ "_" ++ r3, "(i1"++a1++",i2"++a2++",i3"++a3++")") | (x,y,z) <- [(1,0,0), (-1,0,0), (0,1,0), (0,-1,0), (0,0,1), (0,0,-1), (1,1,0), (-1,-1,0), (1,0,1), (-1,0,-1), (0,1,1), (0,-1,-1), (1,1,1), (-1,-1,-1)], let (r1,a1) = rankConv x, let (r2,a2) = rankConv y, let (r3,a3) = rankConv z]
+  --                | otherwise = error "Not support"
   let set n t v = raw ("n->" ++ n ++ " = " ++ v) >> return (n, t)
-  myRank <- set "my_rank" CInt "0"
+  myRank <- set "my_rank" CInt "rank"
   timeStep <- set "time_step" CInt "0"
   mpiWorld <- set "mpi_world" (CRawType "MPI_Comm") "comm"
   lowers <- mapM (\a -> set ("lower_" ++ a) CInt "0") axes
@@ -96,8 +103,8 @@ noBlocking gridStruct globalData = do
   buff <- declLocalVariable (Just "static") buffType "buff" Nothing
   rslt <- declLocalVariable (Just "static") rsltType "rslt" Nothing
   -- 通信
-  recvData <- sendrecv globalData s
-  copy recvData buff [] []
+  sendrecv gridStruct globalData buff s
+
   copy globalData buff [] []
   -- 1ステップ更新
   call "Formura_Step" [ref buff, ref rslt]

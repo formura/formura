@@ -5,8 +5,12 @@ module Formura.Generator.Functions where
 import Control.Lens
 import Control.Monad.Trans
 import Control.Monad.Writer
+import Data.List (intercalate)
+import Data.Traversable (for)
 import Text.Printf
 
+import Formura.GlobalEnvironment
+import Formura.OrthotopeMachine.Graph
 import Formura.Generator.Types
 import Formura.Generator.Encode
 
@@ -126,9 +130,43 @@ copy src tgt srcOffset tgtOffset = do
     tell [mkIdent f tgt idx tgtOffset @= mkIdent f src idx srcOffset | f <- fs, f `elem` (getFields tgt)]
   return ()
 
-sendrecv :: IsGen m => CVariable -> Int -> BuildM m CVariable
-sendrecv v s = do
-  return v
+formatRank :: [Int] -> String
+formatRank b = intercalate "_" [f i | i <- b]
+  where f x | x == 0 = "0"
+            | x == 1 = "p1"
+            | x == -1 = "m1"
+
+sendrecv :: IsGen m => [(String,CType)] -> CVariable -> CVariable -> Int -> BuildM m ()
+sendrecv gridStruct src tgt s = do
+  bases <- view (omGlobalEnvironment . commBases)
+  commType <- defLocalTypeStruct "Formura_Comm_Buf" gridStruct Normal
+  (sendReqs, recvReqs, recvBufs) <- fmap unzip3 $ for bases $ \b -> do
+    let r = formatRank b
+    sendbuf <- declLocalVariable (Just "static") (CArray [] commType) ("send_buf_" ++ r) Nothing
+    copy src sendbuf [] []
+    sendReq <- sendTo r sendbuf
+    let r' = formatRank $ map negate b
+    recvbuf <- declLocalVariable (Just "static") (CArray [] commType) ("recv_buf_" ++ r') Nothing
+    recvReq <- recvFrom r' recvbuf
+    return (sendReq, recvReq, recvbuf)
+  mapM_ wait sendReqs
+  mapM_ wait recvReqs
+  sequence_ [copy recvBuf tgt [] [] | (b,recvBuf) <- zip bases recvBufs]
+
+sendTo :: IsGen m => String -> CVariable -> BuildM m CVariable
+sendTo r v = do
+  req <- declLocalVariable Nothing (CRawType "MPI_Request") ("send_req_" ++ r) Nothing
+  call "MPI_Isend" [ref v, "sizeof(" ++ variableName v ++ ")", "MPI_BYTE", "n->rank_" ++ r, "0", "n->mpi_world", ref req]
+  return req
+
+recvFrom :: IsGen m => String -> CVariable -> BuildM m CVariable
+recvFrom r v = do
+  req <- declLocalVariable Nothing (CRawType "MPI_Request") ("recv_req_" ++ r) Nothing
+  call "MPI_Irecv" [ref v, "sizeof(" ++ variableName v ++ ")", "MPI_BYTE", "n->rank_" ++ r, "0", "n->mpi_world", ref req]
+  return req
+
+wait :: IsGen m => CVariable -> BuildM m ()
+wait v = call "MPI_Wait" [ref v, "MPI_STATUS_IGNORE"]
 
 call :: IsGen m => String -> [String] -> BuildM m ()
 call fn args = do

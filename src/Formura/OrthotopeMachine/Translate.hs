@@ -90,6 +90,11 @@ setupGlobalEnvironment prog = do
     _  -> raiseErr $ failed "multiple axes declaration found."
   dimension .= dim
   axesNames .= axs
+  let bases | dim == 1 = [[1]]
+            | dim == 2 = [[1,0],[0,1],[1,1]]
+            | dim == 3 = [[1,0,0],[0,1,0],[0,0,1],[1,1,0],[1,0,1],[0,1,1],[1,1,1]]
+            | otherwise = error "Not support"
+  commBases .= bases
   where
     spDecls = prog ^. programSpecialDeclarations
 
