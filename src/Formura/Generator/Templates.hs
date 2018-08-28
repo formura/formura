@@ -4,7 +4,7 @@ module Formura.Generator.Templates where
 
 import Control.Lens ((^.), view)
 import Data.Char (toLower)
-import Data.Foldable (toList)
+import Data.Foldable (toList, for_)
 import Data.List
 import qualified Data.Map as M
 import Data.Monoid
@@ -47,7 +47,7 @@ scaffold = do
   sequence_ [declGlobalVariable CDouble ("d" ++ a) (Just $ show d) | (a,d) <- zip axes spaceIntervals]
   globalData <- declGlobalVariable gridStructType "formura_data" Nothing
   
-  defGlobalFunction "to_pos_x" [] CDouble (return ())
+  defUtilFunctions
 
   defGlobalFunction "Formura_Init" [(CRawType "Formura_Navi *","n")] CVoid initBody
   let forwardBody = case (ic ^. icBlockingType) of
@@ -55,6 +55,48 @@ scaffold = do
   (buffType, rsltType) <- defGlobalFunction "Formura_Forward" [(CRawType "Formura_Navi *", "n")] CVoid forwardBody
   let stepBody = raw $ mkStep axes stepGraph
   defLocalFunction "Formura_Step" [(buffType, "buff"), (rsltType, "rslt")] CVoid stepBody
+
+defUtilFunctions :: GenM ()
+defUtilFunctions = do
+  dim <- view (omGlobalEnvironment . dimension)
+  mpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  let encodeRankArg = [(CInt, "p" ++ show i) | i <- [1..dim]]
+  let decodeRankArg = (CInt,"p"):[(CPtr CInt, "p" ++ show i) | i <- [1..dim]]
+  defLocalFunction "Formura_Encode_rank" encodeRankArg CInt $ case dim of
+    1 -> do
+      let m1:_ = mpiShape
+      raw $ printf "return (p1+%d)%%%d" m1 m1
+    2 -> do
+      let m1:m2:_ = mpiShape
+      raw $ printf "return ((p1+%d)%%%d + %d*(p2+%d)%%%d)" m1 m1 m1 m2 m2
+    3 -> do
+      let m1:m2:m3:_ = mpiShape
+      raw $ printf "return ((p1+%d)%%%d + %d*(p2+%d)%%%d + %d*(p3+%d)%%%d)" m1 m1 m1 m2 m2 (m1*m2) m3 m3
+    _ -> error "No support"
+  defLocalFunction "Formura_Decode_rank" decodeRankArg CVoid $ case dim of
+    1 -> do
+      let m1:_ = mpiShape
+      raw $ printf "*p1 = (int)p%%%d" m1
+    2 -> do
+      let m1:m2:_ = mpiShape
+      raw $ printf "*p1 = (int)p%%%d" m1
+      raw $ printf "*p2 = (int)p/%d" m1
+    3 -> do
+      let m1:m2:m3:_ = mpiShape
+      raw $ printf "int p4 = (int)p%%%d" (m1*m2)
+      raw $ printf "*p1 = (int)p4%%%d" m1
+      raw $ printf "*p2 = (int)p4/%d" m1
+      raw $ printf "*p3 = (int)p/%d" (m1*m2)
+    _ -> error "No support"
+
+  axes <- view (omGlobalEnvironment . axesNames)
+  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
+  sleeve <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
+  let totalGrid = zipWith (*) gridPerNode mpiShape
+  let toPosBody a l = do
+        raw $ printf "return d%s*((i+n.offset_%s - (%d*n.time_step)%%%d + %d)%%%d" a a sleeve l l l
+  for_ (zip axes totalGrid) $ \(a,l) ->
+    defGlobalFunction ("to_pos_"++a) [(CInt, "i"), (CRawType "Formura_Navi", "n")] CDouble (toPosBody a l)
 
 initBody :: BuildM GenM ()
 initBody = do
