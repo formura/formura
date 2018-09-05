@@ -7,7 +7,7 @@ import Control.Monad.Trans
 import Control.Monad.Writer
 import Data.List (intercalate)
 import Data.Traversable (for)
-import Text.Printf
+import Text.Printf (printf)
 
 import Formura.NumericalConfig
 import Formura.GlobalEnvironment
@@ -67,15 +67,16 @@ declLocalVariable ml t n mv = do
   tell [Decl v]
   return v
 
-defGlobalFunction :: IsGen m => String -> [(CType, String)] -> CType -> BuildM m a -> m a
+defGlobalFunction :: IsGen m => String -> [(CType, String)] -> CType -> ([CVariable] -> BuildM m a) -> m a
 defGlobalFunction = defFunction globalFunctions
 
-defLocalFunction :: IsGen m => String -> [(CType, String)] -> CType -> BuildM m a -> m a
+defLocalFunction :: IsGen m => String -> [(CType, String)] -> CType -> ([CVariable] -> BuildM m a) -> m a
 defLocalFunction = defFunction localFunctions
 
-defFunction :: IsGen m => (Lens' CodeStructure [CFunction]) -> String -> [(CType, String)] -> CType -> BuildM m a -> m a
+defFunction :: IsGen m => (Lens' CodeStructure [CFunction]) -> String -> [(CType, String)] -> CType -> ([CVariable] -> BuildM m a) -> m a
 defFunction setter name args rt body = do
-  (res, stmts) <- build body
+  let as = [CVariable n t Nothing Nothing | (t,n) <- args]
+  (res, stmts) <- build $ body as
   setter %= (++ [CFunction name rt args stmts])
   return res
 
@@ -103,9 +104,9 @@ getFields (CVariable _ t _ _) =
 
 mkIdent :: String -> CVariable -> [String] -> [Int] -> String
 mkIdent f (CVariable n t _ _) idx offset
-  | isSoA t = n ++ "." ++ f ++ mkIdx idx offset
-  | isSoA' t = n ++ "->" ++ f ++ mkIdx idx offset
-  | isAoS t = n ++ mkIdx idx offset ++ "." ++ f
+  | isSoA t = n ++ "." ++ f ++ formatIdx idx offset
+  | isSoA' t = n ++ "->" ++ f ++ formatIdx idx offset
+  | isAoS t = n ++ formatIdx idx offset ++ "." ++ f
   | otherwise = error "Error at Formura.Generator.Functions.mkIdent"
   where
     isArray (CArray _ _) = True
@@ -116,8 +117,12 @@ mkIdent f (CVariable n t _ _) idx offset
     isSoA' _ = False
     isAoS (CArray _ (CStruct _ _)) = True
     isAoS _ = False
-    show' x = if x == 0 then "" else printf "%+d" x
-    mkIdx is os = concat ["[" ++ i ++ show' o ++ "]" | (i,o) <- zip is os]
+
+formatIdx :: [String] -> [Int] -> String
+formatIdx is os = concat ["[" ++ i ++ formatInt o ++ "]" | (i,o) <- zip is os]
+
+formatInt :: Int -> String
+formatInt x = if x == 0 then "" else printf "%+d" x
 
 (@=) :: String -> String -> CStatement
 l @= r = Bind l r

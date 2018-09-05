@@ -3,10 +3,12 @@
 module Formura.Generator.Templates where
 
 import Control.Lens ((^.), view)
+import Control.Monad.Writer
 import Data.Char (toLower)
 import Data.Foldable (toList, for_)
 import Data.List
 import qualified Data.Map as M
+import Data.Maybe (fromJust)
 import Data.Monoid
 import Text.Printf
 
@@ -17,6 +19,15 @@ import Formura.Generator.Types
 import Formura.Generator.Functions
 import Formura.Syntax
 import Formura.Vec
+
+mapType :: TypeExpr -> CType
+mapType (ElemType "Rational") = CDouble
+mapType (ElemType "int") = CInt
+mapType (ElemType "float") = CFloat
+mapType (ElemType "double") = CDouble
+mapType (ElemType x) = CRawType x
+mapType (GridType _ x) = mapType x
+mapType x = error $ "Unable to translate type to C:" ++ show x
 
 scaffold :: GenM ()
 scaffold = do
@@ -33,13 +44,6 @@ scaffold = do
   let gridPerNode = ic ^. icGridPerNode
   let mkFields :: M.Map IdentName TypeExpr -> [(String, CType)]
       mkFields = M.foldrWithKey (\k t acc -> (k, mapType t):acc) []
-        where mapType (ElemType "Rational") = CDouble
-              mapType (ElemType "int") = CInt
-              mapType (ElemType "float") = CFloat
-              mapType (ElemType "double") = CDouble
-              mapType (ElemType x) = CRawType x
-              mapType (GridType _ x) = mapType x
-              mapType x = error $ "Unable to translate type to C:" ++ show x
   gridStruct <- mkFields <$> view omStateSignature
   gridStructType <- defGlobalTypeStruct "Formura_Grid_Struct" gridStruct (SoA gridPerNode)
 
@@ -49,11 +53,10 @@ scaffold = do
   
   defUtilFunctions
 
-  defGlobalFunction "Formura_Init" [(CRawType "Formura_Navi *","n")] CVoid initBody
+  defGlobalFunction "Formura_Init" [(CRawType "Formura_Navi *","n")] CVoid (\_ -> initBody)
   let forwardBody = case (ic ^. icBlockingType) of
                       NoBlocking -> (noBlocking gridStruct globalData)
-  (buffType, rsltType) <- defGlobalFunction "Formura_Forward" [(CRawType "Formura_Navi *", "n")] CVoid forwardBody
-  let stepBody = raw $ mkStep axes stepGraph
+  (buffType, rsltType) <- defGlobalFunction "Formura_Forward" [(CRawType "Formura_Navi *", "n")] CVoid (\_ -> forwardBody)
   defLocalFunction "Formura_Step" [(buffType, "buff"), (rsltType, "rslt")] CVoid stepBody
 
 defUtilFunctions :: GenM ()
@@ -62,7 +65,7 @@ defUtilFunctions = do
   mpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
   let encodeRankArg = [(CInt, "p" ++ show i) | i <- [1..dim]]
   let decodeRankArg = (CInt,"p"):[(CPtr CInt, "p" ++ show i) | i <- [1..dim]]
-  defLocalFunction "Formura_Encode_rank" encodeRankArg CInt $ case dim of
+  defLocalFunction "Formura_Encode_rank" encodeRankArg CInt $ \_ -> case dim of
     1 -> do
       let m1:_ = mpiShape
       raw $ printf "return (p1+%d)%%%d" m1 m1
@@ -73,7 +76,7 @@ defUtilFunctions = do
       let m1:m2:m3:_ = mpiShape
       raw $ printf "return ((p1+%d)%%%d + %d*(p2+%d)%%%d + %d*(p3+%d)%%%d)" m1 m1 m1 m2 m2 (m1*m2) m3 m3
     _ -> error "No support"
-  defLocalFunction "Formura_Decode_rank" decodeRankArg CVoid $ case dim of
+  defLocalFunction "Formura_Decode_rank" decodeRankArg CVoid $ \_ -> case dim of
     1 -> do
       let m1:_ = mpiShape
       raw $ printf "*p1 = (int)p%%%d" m1
@@ -96,7 +99,7 @@ defUtilFunctions = do
   let toPosBody a l = do
         raw $ printf "return d%s*((i+n.offset_%s - (%d*n.time_step)%%%d + %d)%%%d" a a sleeve l l l
   for_ (zip axes totalGrid) $ \(a,l) ->
-    defGlobalFunction ("to_pos_"++a) [(CInt, "i"), (CRawType "Formura_Navi", "n")] CDouble (toPosBody a l)
+    defGlobalFunction ("to_pos_"++a) [(CInt, "i"), (CRawType "Formura_Navi", "n")] CDouble (\_ -> toPosBody a l)
 
 initBody :: BuildM GenM ()
 initBody = do
@@ -164,72 +167,66 @@ calcSizes = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) a
                                                     in  (n0+s'):acc
             go _ acc = acc
 
--- TODO: FIX ME
-mkStep :: [String] -> MMGraph -> String
-mkStep axes mmg = withTmp $ unlines [ genMMInst omid $ if isVoid omt then mm else insertMNStore omid mm | (omid, (Node mm omt _)) <- M.toAscList mmg ]
-  where
-    sizeTable = calcSizes mmg
-    -- 中間変数を生成するかどうかを判定する
-    -- 型が void なら最後に Store されているはずなので、中間変数を生成しない
-    -- そうでないなら、最後に型に合う変数に結果を書き込む必要がある (最後に命令として Store がない)
-    isVoid (ElemType "void") = True
-    isVoid _ = False
+stepBody :: [CVariable] -> BuildM GenM ()
+stepBody args = do
+  let inputSize = getSize $ args !! 0
+      outputSize = getSize $ args !! 1
+  mmg <- view omStepGraph
+  let sizeTable = calcSizes mmg
+  -- 中間変数を生成するかどうかを判定する
+  -- 型が void なら最後に Store されているはずなので、中間変数を生成しない
+  -- そうでないなら、最後に型に合う変数に結果を書き込む必要がある (最後に命令として Store がない)
+  let isVoid (ElemType "void") = True
+      isVoid _ = False
 
-    insertMNStore :: OMNodeID -> MMInstruction -> MMInstruction
-    insertMNStore oid mm = M.insert (MMNodeID mmid) node mm
-      where mmid = M.size mm
-            node = Node (Store (formatTmp oid) (MMNodeID $ mmid-1)) (ElemType "void") []
+      tmpPrefix = "formura_mn"
+      tmpName oid = tmpPrefix ++ show oid
 
-    withTmp body = unlines [ genTmpDecl omt omid ++ ";" | (omid, (Node _ omt _)) <- M.toAscList mmg, not (isVoid omt) ] ++ body
-
-    genTmpDecl (ElemType "Rational") oid = "double " ++ formatTmp oid
-    genTmpDecl (ElemType x) oid = x ++ " " ++ formatTmp oid
-    genTmpDecl (GridType _ x) oid = let s = sizeTable M.! oid
-                                    in (genTmpDecl x oid) ++ formatSize s
-    genTmpDecl x _ = error $ "Unable to translate type to C:" ++ show x
-
-    genMMInst :: OMNodeID -> MMInstruction -> String
-    genMMInst omid mm = inLoop s $ unlines [ genMicroInst mmid mi mt s ++ ";" | (mmid, (Node mi mt _)) <- M.toAscList mm ]
-      where s = sizeTable M.! omid
-
-    inLoop s body = foldr (\a acc -> let a' = map toLower a in printf "for(int i%s = 0; i%s < N%s + 2*(Ns - %d); i%s++) {\n%s}\n" a' a' a s a' acc) body axes
-
-    formatType :: MicroNodeType -> String
-    formatType (ElemType "Rational") = "double "
-    formatType (ElemType "void") = ""
-    formatType (ElemType x) = x ++ " "
-    formatType _ = error "Invalid type"
-
-    formatIndex :: Vec Int -> String
-    formatIndex di = concat [printf "[i%s%+d]" (map toLower a) i | (a,i) <- zip axes $ toList di]
-
-    formatNode :: MMNodeID -> String
-    formatNode i = "a" ++ show i
-
-    formatTmp :: OMNodeID -> String
-    formatTmp i = "MN" ++ show i
-
-    formatSize :: Int -> String
-    formatSize s = concat [printf "[N%s+2*(Ns-%d)]" a s | a <- axes]
-
-    genMicroInst _ (Store name x) _ _ | "MN" `isPrefixOf` name = name ++ formatIndex (Vec [0,0,0]) ++ " = " ++ formatNode x
-                                      | otherwise = "rslt->" ++ name ++ formatIndex (Vec [0,0,0]) ++ " = " ++ formatNode x
-    genMicroInst mmid mi mt s =
-      let lhs = formatType mt ++ formatNode mmid
-          rhs = case mi of
-                  LoadCursorStatic d name -> "buff->" ++ name ++ formatIndex (d + pure s)
-                  LoadCursor d nid -> let s' = sizeTable M.! nid in formatTmp nid ++ formatIndex (d + pure (s-s'))
-                  Imm r -> show (realToFrac r :: Double)
-                  Uniop op a | "external-call/" `isPrefixOf` op -> let Just f = stripPrefix "extern-call/" op in f ++ "(" ++ formatNode a ++ ")"
-                             | otherwise -> op ++ formatNode a
-                  Binop op a b | op == "**" -> "pow(" ++ formatNode a ++ "," ++ formatNode b ++ ")"
-                               | otherwise -> formatNode a ++ op ++ formatNode b
-                  Triop "ite" a b c -> formatNode a ++ "?" ++ formatNode b ++ ":" ++ formatNode c
-                  -- LoadIndex をサポートするにはグローバルな配列に対するオフセットが必要
-                  -- つまり、Formura_Step のAPIを変更する必要がある
-                  -- LoadIndex i -> "i" ++ (map toLower $ axes !! i)
-                  -- Naryop は廃止かもなので、実装を待つ
-                  -- Naryop op xs -> undefined
-                  x -> error $ "Unimplemented for keyword: " ++ show x
-      in unwords [lhs, "=", rhs]
-
+      insertMNStore :: OMNodeID -> MMInstruction -> MMInstruction
+      insertMNStore oid mm = M.insert (MMNodeID mmid) node mm
+        where mmid = M.size mm
+              node = Node (Store (tmpName oid) (MMNodeID $ mmid-1)) (ElemType "void") []
+  let (tmps, mmg') = M.foldrWithKey (\omid (Node mm omt x) (ts,g) -> if isVoid omt then (ts,M.insert omid (Node mm omt x) g) else ((omid,omt):ts,M.insert omid (Node (insertMNStore omid mm) omt x) g)) ([],M.empty) mmg
+  -- 中間変数の宣言
+  let mapTmpType :: Int -> OMNodeType -> CType
+      mapTmpType _ (ElemType "Rational") = CDouble
+      mapTmpType _ (ElemType "void") = CVoid
+      mapTmpType _ (ElemType "double") = CDouble
+      mapTmpType _ (ElemType "float") = CFloat
+      mapTmpType _ (ElemType "int") = CInt
+      mapTmpType _ (ElemType x) = CRawType x
+      mapTmpType ds (GridType _ x) = CArray [s-2*ds | s <- inputSize] (mapTmpType ds x)
+      mapTmpType _ _ = error "Invalid type"
+  sequence_ [declLocalVariable (Just "static") (mapTmpType (sizeTable M.! omid) omt) (tmpName omid) Nothing | (omid,omt) <- tmps]
+  -- 命令の変換
+  let formatNode i = "a" ++ show i
+      mapType' :: MicroNodeType -> CType
+      mapType' (ElemType "Rational") = CDouble
+      mapType' (ElemType "void") = CVoid
+      mapType' (ElemType "double") = CDouble
+      mapType' (ElemType "float") = CFloat
+      mapType' (ElemType "int") = CInt
+      mapType' (ElemType x) = CRawType x
+      mapType' _ = error "Invalid type"
+  let genMicroInst idx s mmid (Store n x) mt | tmpPrefix `isPrefixOf` n = tell [(n ++ formatIdx idx (repeat 0)) @= formatNode x]
+                                             | otherwise = tell [(mkIdent n (args !! 1) idx (repeat 0)) @= formatNode x]
+      genMicroInst idx s mmid mi mt =
+        let decl x = declLocalVariable Nothing (mapType' mt) (formatNode mmid) (Just x) >> return ()
+        in decl $ case mi of
+            (LoadCursorStatic d n) -> mkIdent n (args !! 0) idx (toList $ d + pure s)
+            (LoadCursor d oid) -> tmpName oid ++ formatIdx idx (toList $ d + pure (s-(sizeTable M.! oid)))
+            (Imm r) -> show (realToFrac r :: Double)
+            (Uniop op a) | "external-call" `isPrefixOf` op -> (fromJust $ stripPrefix "external-call/" op) ++ "(" ++ formatNode a ++ ")"
+                         | otherwise -> op ++ formatNode a
+            (Binop op a b) | op == "**" -> "pow(" ++ formatNode a ++ "," ++ formatNode b ++ ")"
+                           | otherwise -> formatNode a ++ op ++ formatNode b
+            (Triop _ a b c) -> formatNode a ++ "?" ++ formatNode b ++ ":" ++ formatNode c
+            -- LoadIndex をサポートするにはグローバルな配列に対するオフセットが必要
+            -- つまり、Formura_Step のAPIを変更する必要がある
+            -- LoadIndex i -> "i" ++ (map toLower $ axes !! i)
+            -- Naryop は廃止かもなので、実装を待つ
+            -- Naryop op xs -> undefined
+            x -> error $ "Unimplemented for keyword: " ++ show x
+  let genMMInst :: Int -> MMInstruction -> BuildM GenM ()
+      genMMInst s mm = loop [s'-2*s | s' <- inputSize] $ \idx -> sequence_ [genMicroInst idx s mmid mi mt | (mmid, Node mi mt _) <- M.toAscList mm]
+  sequence_ [genMMInst (sizeTable M.! omid) mm | (omid, Node mm _ _) <- M.toAscList mmg']
