@@ -88,12 +88,11 @@ loop size body = do
   tell [Loop idx stmt]
   return ()
 
-getSize :: CVariable -> [Int]
-getSize (CVariable _ t _ _) =
-  case t of
-    (CArray s (CStruct _ _)) -> s
-    (CStruct _ ((_,(CArray s _)):_)) -> s
-    _ -> error "Error at Formura.Generator.Functions.getSize"
+getSize :: CType -> [Int]
+getSize (CPtr t) = getSize t
+getSize (CArray s _) = s
+getSize (CStruct _ ((_,(CArray s _)):_)) = s
+getSize _ = error "Error at Formura.Generator.Functions.getSize" 
 
 getFields :: CVariable -> [String]
 getFields (CVariable _ t _ _) =
@@ -131,7 +130,7 @@ infixl 1 @=
 
 copy :: IsGen m => CVariable -> CVariable -> [Int] -> [Int] -> BuildM m ()
 copy src tgt srcOffset tgtOffset = do
-  let s = zipWith min (getSize src) (getSize tgt)
+  let s = zipWith min (getSize $ variableType src) (getSize $ variableType tgt)
   loop s $ \idx -> do
     let fs = getFields src
     tell [mkIdent f tgt idx tgtOffset @= mkIdent f src idx srcOffset | f <- fs, f `elem` (getFields tgt)]

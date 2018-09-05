@@ -53,11 +53,11 @@ scaffold = do
   
   defUtilFunctions
 
-  defGlobalFunction "Formura_Init" [(CRawType "Formura_Navi *","n")] CVoid (\_ -> initBody)
+  defGlobalFunction "Formura_Init" [(CRawType "Formura_Navi *","n"),(CRawType "MPI_Comm","comm")] CVoid (\_ -> initBody)
   let forwardBody = case (ic ^. icBlockingType) of
                       NoBlocking -> (noBlocking gridStruct globalData)
   (buffType, rsltType) <- defGlobalFunction "Formura_Forward" [(CRawType "Formura_Navi *", "n")] CVoid (\_ -> forwardBody)
-  defLocalFunction "Formura_Step" [(buffType, "buff"), (rsltType, "rslt")] CVoid stepBody
+  defLocalFunction "Formura_Step" [(CPtr buffType, "buff"), (CPtr rsltType, "rslt")] CVoid stepBody
 
 defUtilFunctions :: GenM ()
 defUtilFunctions = do
@@ -97,7 +97,7 @@ defUtilFunctions = do
   sleeve <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
   let totalGrid = zipWith (*) gridPerNode mpiShape
   let toPosBody a l = do
-        raw $ printf "return d%s*((i+n.offset_%s - (%d*n.time_step)%%%d + %d)%%%d" a a sleeve l l l
+        raw $ printf "return d%s*((i+n.offset_%s - (%d*n.time_step)%%%d + %d)%%%d)" a a sleeve l l l
   for_ (zip axes totalGrid) $ \(a,l) ->
     defGlobalFunction ("to_pos_"++a) [(CInt, "i"), (CRawType "Formura_Navi", "n")] CDouble (\_ -> toPosBody a l)
 
@@ -110,6 +110,7 @@ initBody = do
   axes <- view (omGlobalEnvironment . axesNames)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
+  mpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
   dim <- view (omGlobalEnvironment . dimension)
   bases <- view (omGlobalEnvironment . commBases)
   raw $ "int " ++ intercalate "," ["i" ++ show i | i <- [1..dim]]
@@ -127,7 +128,7 @@ initBody = do
   lowers <- mapM (\a -> set ("lower_" ++ a) CInt "0") axes
   uppers <- mapM (\(a,v) -> set ("upper_" ++ a) CInt (show v)) $ zip axes gridPerNode
   offsets <- mapM (\(a,i,l) -> set ("offset_" ++ a) CInt (show l++"*i"++show i)) $ zip3 axes [1..dim] gridPerNode
-  lengthes <- mapM (\(a,v) -> set ("length_" ++ a) CDouble (show v)) $ zip axes lengthPerNode
+  lengthes <- mapM (\(a,v) -> set ("length_" ++ a) CDouble (show v)) $ zip axes $ zipWith (\l m -> l * fromIntegral m) lengthPerNode mpiShape
   ranks <- mapM (\(r,ag) -> set ("rank_" ++ r) CInt ("Formura_Encode_rank" ++ ag)) ranksTable
   let navi = [myRank, timeStep, mpiWorld] <> lowers <> uppers <> offsets <> lengthes <> ranks
   defGlobalTypeStruct "Formura_Navi" navi Normal
@@ -145,7 +146,7 @@ noBlocking gridStruct globalData = do
   -- 通信
   sendrecv gridStruct globalData buff s
 
-  copy globalData buff (repeat (2*s)) (repeat 0)
+  copy globalData buff (repeat 0) (repeat (2*s))
   -- 1ステップ更新
   call "Formura_Step" [ref buff, ref rslt]
   -- 結果の書き出し
@@ -169,8 +170,8 @@ calcSizes = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) a
 
 stepBody :: [CVariable] -> BuildM GenM ()
 stepBody args = do
-  let inputSize = getSize $ args !! 0
-      outputSize = getSize $ args !! 1
+  let inputSize = getSize $ variableType $ args !! 0
+      outputSize = getSize $ variableType $ args !! 1
   mmg <- view omStepGraph
   let sizeTable = calcSizes mmg
   -- 中間変数を生成するかどうかを判定する
