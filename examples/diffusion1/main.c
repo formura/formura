@@ -14,7 +14,7 @@ void setup(Formura_Navi n) {
   double x0 = n.length_x/2.0;
   for(int ix = n.lower_x; ix < n.upper_x; ix++) {
     double x = to_pos_x(ix,n);
-    q[ix] = gauss(x,x0);
+    formura_data.q[ix] = gauss(x,x0);
   }
 }
 
@@ -24,7 +24,7 @@ void writeData(Formura_Navi n) {
   FILE *fp = fopen(fn, "w");
   for(int ix = n.lower_x; ix < n.upper_x; ix++) {
     double x = to_pos_x(ix,n);
-    fprintf(fp, "%f %f\n", x, q[ix]);
+    fprintf(fp, "%f %f\n", x, formura_data.q[ix]);
   }
   fclose(fp);
   printf("Write: %s\n", fn);
@@ -43,12 +43,6 @@ int main(int argc, char **argv) {
     writeData(n);
   }
 
-  printf("NX = %d\n", NX);
-  printf("MX = %d\n", MX);
-  printf("NT = %d\n", NT);
-  printf("DX = %d\n", DX);
-  printf("LX = %d\n", LX);
-  printf("dx = %f\n", dx);
   MPI_Finalize();
   return 0;
 }

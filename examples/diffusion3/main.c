@@ -20,7 +20,7 @@ void setup(Formura_Navi n) {
       double y = to_pos_y(iy,n);
       for(int iz = n.lower_z; iz < n.upper_z; iz++) {
         double z = to_pos_z(iz,n);
-        q[ix][iy][iz] = gauss(x,y,z,x0,y0,z0);
+        formura_data.q[ix][iy][iz] = gauss(x,y,z,x0,y0,z0);
       }
     }
   }
@@ -49,15 +49,15 @@ void writeData(Formura_Navi n) {
       double y = to_pos_y(iy,n);
       for(int iz = n.lower_z; iz < n.upper_z; ++iz) {
         double z = to_pos_z(iz,n);
-        fprintf(fp, "%f %f %f %f\n", x, y, z, q[ix][iy][iz]);
+        fprintf(fp, "%f %f %f %f\n", x, y, z, formura_data.q[ix][iy][iz]);
         if (z == z0) {
-          fprintf(fp_xy, "%f %f %f %f\n", x, y, z, q[ix][iy][iz]);
+          fprintf(fp_xy, "%f %f %f %f\n", x, y, z, formura_data.q[ix][iy][iz]);
         }
         if (x == x0) {
-          fprintf(fp_yz, "%f %f %f %f\n", x, y, z, q[ix][iy][iz]);
+          fprintf(fp_yz, "%f %f %f %f\n", x, y, z, formura_data.q[ix][iy][iz]);
         }
         if (y == y0) {
-          fprintf(fp_zx, "%f %f %f %f\n", x, y, z, q[ix][iy][iz]);
+          fprintf(fp_zx, "%f %f %f %f\n", x, y, z, formura_data.q[ix][iy][iz]);
         }
       }
       fprintf(fp, "\n");
