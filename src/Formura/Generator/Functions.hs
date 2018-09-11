@@ -145,7 +145,7 @@ instance IsIdx [Int] where
   toIdx is = Idx [formatInt i | i <- is]
 
 instance Show Idx where
-  show (Idx is) = concat ["[" ++ show i ++ "]" | i <- is]
+  show (Idx is) = concat ["[" ++ i ++ "]" | i <- is]
 
 -- instance Semigroup Idx where
 --   (Idx is) <> (Idx is') = Idx (zipWith (++) is is')

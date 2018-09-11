@@ -151,7 +151,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
   -- 床の更新 (ブロックごとに)
   loopWith [("j" ++ show i,m-1,0,-1) | (i,m) <- zip [1..dim] blockPerNode] $ \idx -> do
   -- - 床の読み込み
-    let floorOffset = idx <> toIdx ["*" ++ show n | n <- gridPerBlock]
+    let floorOffset = toIdx ["+" ++ show n ++ "*" | n <- gridPerBlock] <> idx
     copy tmpFloor rslt floorOffset empty
   -- - NT段更新
     loopWith [("it",0,nt,1)] $ \it -> do
