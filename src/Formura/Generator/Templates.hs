@@ -56,6 +56,7 @@ scaffold = do
   defGlobalFunction "Formura_Init" [(CRawType "Formura_Navi *","n"),(CRawType "MPI_Comm","comm")] CVoid (\_ -> initBody)
   let forwardBody = case (ic ^. icBlockingType) of
                       NoBlocking -> (noBlocking gridStruct globalData)
+                      TemporalBlocking gpb bpn nt -> temporalBlocking gridStruct globalData gpb bpn nt
   (buffType, rsltType) <- defGlobalFunction "Formura_Forward" [(CRawType "Formura_Navi *", "n")] CVoid (\_ -> forwardBody)
   defLocalFunction "Formura_Step" [(CPtr buffType, "buff"), (CPtr rsltType, "rslt")] CVoid stepBody
 
@@ -101,12 +102,85 @@ defUtilFunctions = do
   for_ (zip axes totalGrid) $ \(a,l) ->
     defGlobalFunction ("to_pos_"++a) [(CInt, "i"), (CRawType "Formura_Navi", "n")] CDouble (\_ -> toPosBody a l)
 
+noBlocking :: [(String, CType)] -> CVariable -> BuildM GenM (CType, CType)
+noBlocking gridStruct globalData = do
+  s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
+  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
+  buffType <- defLocalTypeStruct "Formura_Buff" gridStruct (SoA $ map (+ (2*s)) gridPerNode)
+  rsltType <- defLocalTypeStruct "Formura_Rslt" gridStruct (SoA gridPerNode)
+  buff <- declLocalVariable (Just "static") buffType "buff" Nothing
+  rslt <- declLocalVariable (Just "static") rsltType "rslt" Nothing
+  -- 通信
+  sendrecv gridStruct globalData buff s
+
+  copy globalData buff empty empty
+  -- 1ステップ更新
+  call "Formura_Step" [ref buff, ref rslt]
+  -- 結果の書き出し
+  copy rslt globalData empty empty
+  -- time_step を更新
+  raw "n->time_step += 1"
+  return (buffType, rsltType)
+
+temporalBlocking :: [(String,CType)] -> CVariable -> [Int] -> [Int] -> Int -> BuildM GenM (CType, CType)
+temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
+  s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
+  dim <- view (omGlobalEnvironment . dimension)
+  buffType <- defLocalTypeStruct "Formura_Buff" gridStruct (SoA $ map (+ (2*s)) gridPerBlock)
+  rsltType <- defLocalTypeStruct "Formura_Rslt" gridStruct (SoA gridPerBlock)
+  buff <- declLocalVariable (Just "static") buffType "buff" Nothing
+  rslt <- declLocalVariable (Just "static") rsltType "rslt" Nothing
+  -- 床の準備
+  tmpFloorType <- defLocalTypeStruct "Formura_Tmp_Floor" gridStruct (SoA $ zipWith (*) gridPerBlock blockPerNode)
+  tmpFloor <- declLocalVariable (Just "static") tmpFloorType "tmp_floor" Nothing
+  copy globalData tmpFloor empty (repeat (2*s*nt))
+  -- 壁の準備
+  -- 3次元の場合の壁の大きさ
+  -- x壁: [MY][MZ][NT][2*Ns][NY+2*Ns][NZ+2*Ns]
+  -- y壁: [MX][MZ][NT][NX+2*Ns][2*Ns][NZ+2*Ns]
+  -- z壁: [MX][MY][NT][NX+2*Ns][NY+2*Ns][2*Ns]
+  tmpWalls <- forM [([i == j | j <- [1..dim]],i) | i <- [1..dim]] $ \(flag,i) -> do
+    let bs = [n | (n,b) <- zip blockPerNode flag, not b]
+        gs = [if b then 2*s else n+2*s | (n,b) <- zip gridPerBlock flag]
+    tmpWallType <- defLocalTypeStruct ("Formura_Tmp_Wall_" ++ show i) gridStruct (SoA $ bs ++ [nt] ++ gs)
+    tmpWall <- declLocalVariable (Just "static") tmpWallType ("tmp_wall_" ++ show i) Nothing
+    return (flag, gs, tmpWall)
+  -- 通信
+  rs <- isendrecv gridStruct globalData (2*s*nt)
+  waitAndCopy rs tmpFloor (2*s*nt)
+  -- 床の更新 (ブロックごとに)
+  loopWith [("j" ++ show i,m-1,0,-1) | (i,m) <- zip [1..dim] blockPerNode] $ \idx -> do
+  -- - 床の読み込み
+    let floorOffset = idx <> toIdx ["*" ++ show n | n <- gridPerBlock]
+    copy tmpFloor rslt floorOffset empty
+  -- - NT段更新
+    loopWith [("it",0,nt,1)] $ \it -> do
+  --   - buffに床をセット
+      copy rslt buff empty empty
+  --   - buffに壁をセット
+      for_ tmpWalls $ \(flag, gs, tmpWall) -> do
+        let idx0 = (toIdx [i | (i,b) <- zip (unwrap idx) flag, not b]) >< it
+        loop gs $ \idx' ->
+          tell [mkIdent f buff (idx <> toIdx [if b then n else 0 | (b,n) <- zip flag gridPerBlock]) @= mkIdent f tmpWall (idx0 >< idx) | f <- (getFields tmpWall), f `elem` (getFields buff)]
+        return ()
+  --   - 1段更新
+      call "Formura_Step" [ref buff, ref rslt]
+  --   - 壁の書き出し
+      for_ tmpWalls $ \(flag, gs, tmpWall) -> do
+        let idx0 = (toIdx [i | (i,b) <- zip (unwrap idx) flag, not b]) >< it
+        loop gs $ \idx' ->
+          tell [mkIdent f tmpWall (idx0 >< idx)  @= mkIdent f buff idx | f <- (getFields buff), f `elem` (getFields tmpWall)]
+        return ()
+  -- - 床の書き出し
+    copy rslt tmpFloor empty floorOffset
+  copy tmpFloor globalData empty empty
+  return (buffType, rsltType)
+
 initBody :: BuildM GenM ()
 initBody = do
   raw "int size, rank"
   raw "MPI_Comm_size(comm, &size)"
   raw "MPI_Comm_rank(comm, &rank)"
-  -- TODO: Formura_Decode_rank 関数の呼び出し
   axes <- view (omGlobalEnvironment . axesNames)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
@@ -134,26 +208,6 @@ initBody = do
   defGlobalTypeStruct "Formura_Navi" navi Normal
   return ()
 
-
-noBlocking :: [(String, CType)] -> CVariable -> BuildM GenM (CType, CType)
-noBlocking gridStruct globalData = do
-  s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
-  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
-  buffType <- defLocalTypeStruct "Formura_Buff" gridStruct (SoA $ map (+ (2*s)) gridPerNode)
-  rsltType <- defLocalTypeStruct "Formura_Rslt" gridStruct (SoA gridPerNode)
-  buff <- declLocalVariable (Just "static") buffType "buff" Nothing
-  rslt <- declLocalVariable (Just "static") rsltType "rslt" Nothing
-  -- 通信
-  sendrecv gridStruct globalData buff s
-
-  copy globalData buff (repeat 0) (repeat (2*s))
-  -- 1ステップ更新
-  call "Formura_Step" [ref buff, ref rslt]
-  -- 結果の書き出し
-  copy rslt globalData (repeat 0) (repeat 0)
-  -- time_step を更新
-  raw "n->time_step += 1"
-  return (buffType, rsltType)
 
 -- Manifestノードの配列サイズを計算する
 -- もとの配列サイズ NX+2Ns に比べてどれだけ小さいかを求める
@@ -209,13 +263,13 @@ stepBody args = do
       mapType' (ElemType "int") = CInt
       mapType' (ElemType x) = CRawType x
       mapType' _ = error "Invalid type"
-  let genMicroInst idx s mmid (Store n x) mt | tmpPrefix `isPrefixOf` n = tell [(n ++ formatIdx idx (repeat 0)) @= formatNode x]
-                                             | otherwise = tell [(mkIdent n (args !! 1) idx (repeat 0)) @= formatNode x]
+  let genMicroInst idx s mmid (Store n x) mt | tmpPrefix `isPrefixOf` n = tell [(n ++ show idx) @= formatNode x]
+                                             | otherwise = tell [(mkIdent n (args !! 1) idx) @= formatNode x]
       genMicroInst idx s mmid mi mt =
         let decl x = declLocalVariable Nothing (mapType' mt) (formatNode mmid) (Just x) >> return ()
         in decl $ case mi of
-            (LoadCursorStatic d n) -> mkIdent n (args !! 0) idx (toList $ d + pure s)
-            (LoadCursor d oid) -> tmpName oid ++ formatIdx idx (toList $ d + pure (s-(sizeTable M.! oid)))
+            (LoadCursorStatic d n) -> mkIdent n (args !! 0) (idx <> (toIdx . toList $ d + pure s))
+            (LoadCursor d oid) -> tmpName oid ++ show (idx <> (toIdx . toList $ d + pure (s-(sizeTable M.! oid))))
             (Imm r) -> show (realToFrac r :: Double)
             (Uniop op a) | "external-call" `isPrefixOf` op -> (fromJust $ stripPrefix "external-call/" op) ++ "(" ++ formatNode a ++ ")"
                          | otherwise -> op ++ formatNode a

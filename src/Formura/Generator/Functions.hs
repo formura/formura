@@ -1,4 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RankNTypes #-}
 module Formura.Generator.Functions where
 
@@ -6,6 +8,7 @@ import Control.Lens
 import Control.Monad.Trans
 import Control.Monad.Writer
 import Data.List (intercalate)
+import Data.Monoid
 import Data.Traversable (for)
 import Text.Printf (printf)
 
@@ -14,7 +17,6 @@ import Formura.GlobalEnvironment
 import Formura.OrthotopeMachine.Graph
 import Formura.Generator.Types
 import Formura.Generator.Encode
-
 
 addHeader :: IsGen m => String -> m ()
 addHeader h = headers %= (++ ["#include " ++ h])
@@ -80,11 +82,14 @@ defFunction setter name args rt body = do
   setter %= (++ [CFunction name rt args stmts])
   return res
 
-loop :: IsGen m => [Int] -> ([String] -> BuildM m ()) -> BuildM m ()
+loop :: IsGen m => [Int] -> (Idx -> BuildM m ()) -> BuildM m ()
 loop size body = do
-  let idxNames = ["i" ++ show i | i <- [1..(length size)]]
-  let idx = [(n, 0, s, 1) | (n,s) <- zip idxNames size]
-  (_, stmt) <- lift $ build $ body idxNames
+  let idx = [("i" ++ show i, 0, s, 1) | (i,s) <- zip [1..(length size)] size]
+  loopWith idx body
+
+loopWith :: IsGen m => [(String,Int,Int,Int)] -> (Idx -> BuildM m ()) -> BuildM m ()
+loopWith idx body = do
+  (_, stmt) <- lift $ build $ body $ toIdx [n | (n,_,_,_) <- idx]
   tell [Loop idx stmt]
   return ()
 
@@ -101,11 +106,11 @@ getFields (CVariable _ t _ _) =
     (CStruct _ fs) -> map fst fs
     _ -> error "Error at Formura.Generator.Functions.getFields"
 
-mkIdent :: String -> CVariable -> [String] -> [Int] -> String
-mkIdent f (CVariable n t _ _) idx offset
-  | isSoA t = n ++ "." ++ f ++ formatIdx idx offset
-  | isSoA' t = n ++ "->" ++ f ++ formatIdx idx offset
-  | isAoS t = n ++ formatIdx idx offset ++ "." ++ f
+mkIdent :: String -> CVariable -> Idx -> String
+mkIdent f (CVariable n t _ _) idx
+  | isSoA t = n ++ "." ++ f ++ show idx
+  | isSoA' t = n ++ "->" ++ f ++ show idx
+  | isAoS t = n ++ show idx ++ "." ++ f
   | otherwise = error "Error at Formura.Generator.Functions.mkIdent"
   where
     isArray (CArray _ _) = True
@@ -117,9 +122,6 @@ mkIdent f (CVariable n t _ _) idx offset
     isAoS (CArray _ (CStruct _ _)) = True
     isAoS _ = False
 
-formatIdx :: [String] -> [Int] -> String
-formatIdx is os = concat ["[" ++ i ++ formatInt o ++ "]" | (i,o) <- zip is os]
-
 formatInt :: Int -> String
 formatInt x = if x == 0 then "" else printf "%+d" x
 
@@ -128,12 +130,44 @@ l @= r = Bind l r
 
 infixl 1 @=
 
-copy :: IsGen m => CVariable -> CVariable -> [Int] -> [Int] -> BuildM m ()
+newtype Idx = Idx { unwrap :: [String] }
+
+class IsIdx a where
+  toIdx :: a -> Idx
+
+instance IsIdx Idx where
+  toIdx = id
+
+instance IsIdx [String] where
+  toIdx i = Idx i
+
+instance IsIdx [Int] where
+  toIdx is = Idx [formatInt i | i <- is]
+
+instance Show Idx where
+  show (Idx is) = concat ["[" ++ show i ++ "]" | i <- is]
+
+-- instance Semigroup Idx where
+--   (Idx is) <> (Idx is') = Idx (zipWith (++) is is')
+
+instance Monoid Idx where
+  mempty = toIdx @[Int] (repeat 0)
+  mappend (Idx is) (Idx is') = Idx (zipWith (++) is is')
+
+(><) :: Idx -> Idx -> Idx
+(Idx is) >< (Idx is') = Idx (is ++ is')
+
+infixr 1 ><
+
+empty :: Idx
+empty = mempty
+
+copy :: (IsGen m, IsIdx a, IsIdx b) => CVariable -> CVariable -> a -> b -> BuildM m ()
 copy src tgt srcOffset tgtOffset = do
   let s = zipWith min (getSize $ variableType src) (getSize $ variableType tgt)
   loop s $ \idx -> do
     let fs = getFields src
-    tell [mkIdent f tgt idx tgtOffset @= mkIdent f src idx srcOffset | f <- fs, f `elem` (getFields tgt)]
+    tell [mkIdent f tgt (idx <> toIdx tgtOffset) @= mkIdent f src (idx <> toIdx srcOffset) | f <- fs, f `elem` (getFields tgt)]
   return ()
 
 formatRank :: [Int] -> String
@@ -144,21 +178,31 @@ formatRank b = intercalate "_" [f i | i <- b]
 
 sendrecv :: IsGen m => [(String,CType)] -> CVariable -> CVariable -> Int -> BuildM m ()
 sendrecv gridStruct src tgt s = do
+  rs <- isendrecv gridStruct src s
+  waitAndCopy rs tgt s
+
+isendrecv :: IsGen m => [(String,CType)] -> CVariable -> Int -> BuildM m ([CVariable],[CVariable],[CVariable])
+isendrecv gridStruct src s = do
   bases <- view (omGlobalEnvironment . commBases)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   commType <- defLocalTypeStruct "Formura_Comm_Buf" gridStruct Normal
-  (sendReqs, recvReqs, recvBufs) <- fmap unzip3 $ for bases $ \b -> do
+  fmap unzip3 $ for bases $ \b -> do
     let r = formatRank b
     sendbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("send_buf_" ++ r) Nothing
-    copy src sendbuf [if d == 1 then n-2*s else 0 | (d,n) <- zip b gridPerNode] (repeat 0)
+    copy src sendbuf [if d == 1 then n-2*s else 0 | (d,n) <- zip b gridPerNode] empty
     sendReq <- sendTo r sendbuf
     let r' = formatRank $ map negate b
     recvbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("recv_buf_" ++ r') Nothing
     recvReq <- recvFrom r' recvbuf
     return (sendReq, recvReq, recvbuf)
+
+waitAndCopy :: IsGen m => ([CVariable],[CVariable],[CVariable]) -> CVariable -> Int -> BuildM m ()
+waitAndCopy (sendReqs,recvReqs,recvBufs) tgt s = do
+  bases <- view (omGlobalEnvironment . commBases)
+  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   mapM_ wait sendReqs
   mapM_ wait recvReqs
-  sequence_ [copy recvBuf tgt (repeat 0) [if d == 1 then 0 else 2*s | (d,n) <- zip b gridPerNode] | (b,recvBuf) <- zip bases recvBufs]
+  sequence_ [copy recvBuf tgt empty [if d == 1 then 0 else 2*s | (d,n) <- zip b gridPerNode] | (b,recvBuf) <- zip bases recvBufs]
 
 sendTo :: IsGen m => String -> CVariable -> BuildM m CVariable
 sendTo r v = do
