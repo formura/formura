@@ -146,7 +146,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
     tmpWall <- declLocalVariable (Just "static") tmpWallType ("tmp_wall_" ++ show i) Nothing
     return (flag, gs, tmpWall)
   -- 通信
-  rs <- isendrecv gridStruct globalData (2*s*nt)
+  rs <- isendrecv gridStruct globalData (s*nt)
   -- 即時計算可能なブロックと通信待ちブロックの分離
   let b0 = [(0,m-1-d) | (n,m) <- zip gridPerBlock blockPerNode, let d = 2*s*nt `div` n]
       bs = [[(if i == j then m-1-d else 0, if i > j then m-1-d else m) | (n,m,i) <- zip3 gridPerBlock blockPerNode [1..dim], let d = 2*s*nt `div` n] | j <- [1..dim]]
@@ -163,7 +163,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
           for_ tmpWalls $ \(flag, gs, tmpWall) -> do
             let idx0 = (toIdx [i | (i,b) <- zip (unwrap idx) flag, not b]) >< it
             loop gs $ \idx' ->
-              tell [mkIdent f buff (idx <> toIdx [if b then n else 0 | (b,n) <- zip flag gridPerBlock]) @= mkIdent f tmpWall (idx0 >< idx) | f <- (getFields tmpWall), f `elem` (getFields buff)]
+              tell [mkIdent f buff (idx' <> toIdx [if b then n else 0 | (b,n) <- zip flag gridPerBlock]) @= mkIdent f tmpWall (idx0 >< idx') | f <- (getFields tmpWall), f `elem` (getFields buff)]
             return ()
       --   - 1段更新
           call "Formura_Step" [ref buff, ref rslt]
@@ -171,7 +171,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
           for_ tmpWalls $ \(flag, gs, tmpWall) -> do
             let idx0 = (toIdx [i | (i,b) <- zip (unwrap idx) flag, not b]) >< it
             loop gs $ \idx' ->
-              tell [mkIdent f tmpWall (idx0 >< idx)  @= mkIdent f buff idx | f <- (getFields buff), f `elem` (getFields tmpWall)]
+              tell [mkIdent f tmpWall (idx0 >< idx')  @= mkIdent f buff idx' | f <- (getFields buff), f `elem` (getFields tmpWall)]
             return ()
       -- - 床の書き出し
         copy rslt tmpFloor empty floorOffset
@@ -180,6 +180,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
   waitAndCopy rs tmpFloor (2*s*nt)
   mapM_ update bs
   copy tmpFloor globalData empty empty
+  raw $ "n->time_step += " ++ show nt
   return (buffType, rsltType)
 
 initBody :: BuildM GenM ()
