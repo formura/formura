@@ -147,32 +147,38 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
     return (flag, gs, tmpWall)
   -- 通信
   rs <- isendrecv gridStruct globalData (2*s*nt)
-  waitAndCopy rs tmpFloor (2*s*nt)
+  -- 即時計算可能なブロックと通信待ちブロックの分離
+  let b0 = [(0,m-1-d) | (n,m) <- zip gridPerBlock blockPerNode, let d = 2*s*nt `div` n]
+      bs = [[(if i == j then m-1-d else 0, if i > j then m-1-d else m) | (n,m,i) <- zip3 gridPerBlock blockPerNode [1..dim], let d = 2*s*nt `div` n] | j <- [1..dim]]
   -- 床の更新 (ブロックごとに)
-  loopWith [("j" ++ show i,m-1,0,-1) | (i,m) <- zip [1..dim] blockPerNode] $ \idx -> do
-  -- - 床の読み込み
-    let floorOffset = toIdx ["+" ++ show n ++ "*" | n <- gridPerBlock] <> idx
-    copy tmpFloor rslt floorOffset empty
-  -- - NT段更新
-    loopWith [("it",0,nt,1)] $ \it -> do
-  --   - buffに床をセット
-      copy rslt buff empty empty
-  --   - buffに壁をセット
-      for_ tmpWalls $ \(flag, gs, tmpWall) -> do
-        let idx0 = (toIdx [i | (i,b) <- zip (unwrap idx) flag, not b]) >< it
-        loop gs $ \idx' ->
-          tell [mkIdent f buff (idx <> toIdx [if b then n else 0 | (b,n) <- zip flag gridPerBlock]) @= mkIdent f tmpWall (idx0 >< idx) | f <- (getFields tmpWall), f `elem` (getFields buff)]
-        return ()
-  --   - 1段更新
-      call "Formura_Step" [ref buff, ref rslt]
-  --   - 壁の書き出し
-      for_ tmpWalls $ \(flag, gs, tmpWall) -> do
-        let idx0 = (toIdx [i | (i,b) <- zip (unwrap idx) flag, not b]) >< it
-        loop gs $ \idx' ->
-          tell [mkIdent f tmpWall (idx0 >< idx)  @= mkIdent f buff idx | f <- (getFields buff), f `elem` (getFields tmpWall)]
-        return ()
-  -- - 床の書き出し
-    copy rslt tmpFloor empty floorOffset
+  let update boundary = loopWith [("j" ++ show i,l,u,1) | (i,(l,u)) <- zip [1..dim] boundary] $ \idx -> do
+      -- - 床の読み込み
+        let floorOffset = toIdx ["+" ++ show (n*(m-1)) ++ "-" ++ show n ++ "*" | (n,m) <- zip gridPerBlock blockPerNode] <> idx
+        copy tmpFloor rslt floorOffset empty
+      -- - NT段更新
+        loopWith [("it",0,nt,1)] $ \it -> do
+      --   - buffに床をセット
+          copy rslt buff empty empty
+      --   - buffに壁をセット
+          for_ tmpWalls $ \(flag, gs, tmpWall) -> do
+            let idx0 = (toIdx [i | (i,b) <- zip (unwrap idx) flag, not b]) >< it
+            loop gs $ \idx' ->
+              tell [mkIdent f buff (idx <> toIdx [if b then n else 0 | (b,n) <- zip flag gridPerBlock]) @= mkIdent f tmpWall (idx0 >< idx) | f <- (getFields tmpWall), f `elem` (getFields buff)]
+            return ()
+      --   - 1段更新
+          call "Formura_Step" [ref buff, ref rslt]
+      --   - 壁の書き出し
+          for_ tmpWalls $ \(flag, gs, tmpWall) -> do
+            let idx0 = (toIdx [i | (i,b) <- zip (unwrap idx) flag, not b]) >< it
+            loop gs $ \idx' ->
+              tell [mkIdent f tmpWall (idx0 >< idx)  @= mkIdent f buff idx | f <- (getFields buff), f `elem` (getFields tmpWall)]
+            return ()
+      -- - 床の書き出し
+        copy rslt tmpFloor empty floorOffset
+
+  update b0
+  waitAndCopy rs tmpFloor (2*s*nt)
+  mapM_ update bs
   copy tmpFloor globalData empty empty
   return (buffType, rsltType)
 
