@@ -177,7 +177,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
         copy rslt tmpFloor empty floorOffset
 
   update b0
-  waitAndCopy rs tmpFloor (2*s*nt)
+  waitAndCopy rs tmpFloor (s*nt)
   mapM_ update bs
   copy tmpFloor globalData empty empty
   raw $ "n->time_step += " ++ show nt
