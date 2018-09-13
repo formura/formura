@@ -12,7 +12,8 @@ render :: CodeStructure -> (String, String)
 render cs = (hContent, cContent)
   where
     encodesWith f getter = map f (cs ^. getter)
-    hContent = unlines $ encodesWith encodeH headers
+    hContent = unlines $ ["#pragma once"]
+                      ++ encodesWith encodeH headers
                       ++ encodesWith encodeH globalTypes
                       ++ encodesWith encodeH globalVariables
                       ++ encodesWith encodeH globalFunctions
