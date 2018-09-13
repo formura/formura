@@ -469,7 +469,7 @@ constIntExpr = fromInteger <$> natural
 
 
 specialDeclaration :: P SpecialDeclaration
-specialDeclaration = dd  <|> ad
+specialDeclaration = dd  <|> ad <|> td <|> nd
   where
     dd = do
       "dimension declaration" ?> try $ keyword "dimension"
@@ -481,6 +481,16 @@ specialDeclaration = dd  <|> ad
       keyword "::"
       xs <- identName `sepBy` symbolic ','
       return $ AxesDeclaration xs
+    td = do
+      "global struct type name declaration" ?> try $ keyword "grid_struct_type_name"
+      keyword "::"
+      t <- identName
+      return $ GridStructTypeNameDeclaration t
+    nd = do
+      "global struct instance name declaration" ?> try $ keyword "grid_struct_instance_name"
+      keyword "::"
+      n <- identName
+      return $ GridStructInstanceNameDeclaration n
 
 program :: WithCommandLineOption => NumericalConfig -> P Program
 program nc0 = do

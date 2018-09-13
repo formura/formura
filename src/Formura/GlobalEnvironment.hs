@@ -10,6 +10,8 @@ import Formura.Syntax
 data GlobalEnvironment = GlobalEnvironment
   { _dimension :: Int
   , _axesNames :: [IdentName]
+  , _gridStructTypeName :: IdentName
+  , _gridStructInstanceName :: IdentName
   , _envNumericalConfig :: InternalConfig
   , _commBases :: [[Int]]
   } deriving (Eq, Ord, Show)
@@ -17,4 +19,4 @@ data GlobalEnvironment = GlobalEnvironment
 makeClassy ''GlobalEnvironment
 
 defaultGlobalEnvironment :: GlobalEnvironment
-defaultGlobalEnvironment = GlobalEnvironment 0 [] defaultInternalConfig []
+defaultGlobalEnvironment = GlobalEnvironment 0 [] "" "" defaultInternalConfig []

@@ -30,6 +30,8 @@ scaffold :: GenM ()
 scaffold = do
   ic <- view (omGlobalEnvironment . envNumericalConfig)
   axes <- view (omGlobalEnvironment . axesNames)
+  typeName <- view (omGlobalEnvironment . gridStructTypeName)
+  insntaceName <- view (omGlobalEnvironment . gridStructInstanceName)
 
   addHeader "<stdio.h>"
   addHeader "<stdbool.h>"
@@ -40,11 +42,11 @@ scaffold = do
   let mkFields :: M.Map IdentName TypeExpr -> [(String, CType)]
       mkFields = M.foldrWithKey (\k t acc -> (k, mapType t):acc) []
   gridStruct <- mkFields <$> view omStateSignature
-  gridStructType <- defGlobalTypeStruct "Formura_Grid_Struct" gridStruct (SoA gridPerNode)
+  gridStructType <- defGlobalTypeStruct typeName gridStruct (SoA gridPerNode)
 
   let spaceIntervals = ic ^. icSpaceInterval
   sequence_ [declGlobalVariable CDouble ("d" ++ a) (Just $ show d) | (a,d) <- zip axes spaceIntervals]
-  globalData <- declGlobalVariable gridStructType "formura_data" Nothing
+  globalData <- declGlobalVariable gridStructType insntaceName Nothing
   
   defUtilFunctions
 

@@ -79,6 +79,8 @@ type LexGenM = CompilerMonad LexBinding () CodegenState
 
 setupGlobalEnvironment :: Program -> GenM ()
 setupGlobalEnvironment prog = do
+  let defaultGridStructTypeName = "Formura_Grid_Struct"
+      defaultGridStructInstanceName = "formura_data"
   dim <- case concatMap findDimension spDecls of
     [n] -> return n
     [] -> raiseErr $ failed "no dimension declaration found."
@@ -88,8 +90,18 @@ setupGlobalEnvironment prog = do
     [_] -> raiseErr $ failed "number of declared axes does not match the declared dimension."
     [] -> raiseErr $ failed "no axes declaration found."
     _  -> raiseErr $ failed "multiple axes declaration found."
+  gridType <- case concatMap findGridStructTypeNameDeclaration spDecls of
+    [t] -> return (if null t then defaultGridStructTypeName else t)
+    [] -> return defaultGridStructTypeName
+    _ -> raiseErr $ failed "multiple grid_struct_type_name found."
+  gridInstance <- case concatMap findGridStructInstanceNameDeclaration spDecls of
+    [n] -> return (if null n then defaultGridStructInstanceName else n)
+    [] -> return defaultGridStructInstanceName
+    _ -> raiseErr $ failed "multiple grid_struct_instance_name found."
   dimension .= dim
   axesNames .= axs
+  gridStructTypeName .= gridType
+  gridStructInstanceName .= gridInstance
   let bases | dim == 1 = [[1]]
             | dim == 2 = [[1,0],[0,1],[1,1]]
             | dim == 3 = [[1,0,0],[0,1,0],[0,0,1],[1,1,0],[1,0,1],[0,1,1],[1,1,1]]
@@ -105,6 +117,15 @@ setupGlobalEnvironment prog = do
     findAxesDeclaration :: SpecialDeclaration -> [[IdentName]]
     findAxesDeclaration (AxesDeclaration xs) = [xs]
     findAxesDeclaration _ = []
+
+    findGridStructTypeNameDeclaration :: SpecialDeclaration -> [IdentName]
+    findGridStructTypeNameDeclaration (GridStructTypeNameDeclaration t) = [t]
+    findGridStructTypeNameDeclaration _ = []
+
+    findGridStructInstanceNameDeclaration :: SpecialDeclaration -> [IdentName]
+    findGridStructInstanceNameDeclaration (GridStructInstanceNameDeclaration n) = [n]
+    findGridStructInstanceNameDeclaration _ = []
+
 
 
 class Generatable f where
