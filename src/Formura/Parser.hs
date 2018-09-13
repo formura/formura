@@ -79,7 +79,7 @@ keyword k = "keyword " ++ k ?> do
 keywordSet :: S.Set IdentName
 keywordSet = S.fromList
                ["begin", "end", "function", "returns", "let", "in", "fun"
-               , "dimension", "axes", "if", "then", "else", "const", "extern", "manifest"
+               , "dimension", "axes", "grid_struct_type_name", "grid_struct_instance_name", "if", "then", "else", "const", "extern", "manifest"
                , "+", "-", "*", "/", ".", "**", "::", "=", ","
                , "&&", "||"
                ]
