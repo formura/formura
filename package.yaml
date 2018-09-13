@@ -33,7 +33,6 @@ library:
   - blaze-markup
   - cases
   - directory
-  - either
   - filepath
   - gitrev
   - lattices
