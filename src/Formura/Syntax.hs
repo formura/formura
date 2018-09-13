@@ -325,6 +325,8 @@ type RExprF = Sum '[ LetF, LambdaF, ApplyF, GridF, TupleF, OperatorF, IdentF, Im
 
 data SpecialDeclaration = DimensionDeclaration Int
                         | AxesDeclaration [IdentName]
+                        | GridStructTypeNameDeclaration IdentName
+                        | GridStructInstanceNameDeclaration IdentName
   deriving (Eq, Ord, Show, Data)
 
 data Program = Program

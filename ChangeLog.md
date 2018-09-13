@@ -1,4 +1,9 @@
 # Changelog for formura
+## version 2.1
+
+- Add no blocking mode
+- Add the name of the global data structure
+
 ## version 2.0
 
 - Change the temporal blocking form
