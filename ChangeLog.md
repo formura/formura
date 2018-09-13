@@ -1,4 +1,8 @@
 # Changelog for formura
+## version 2.2
+
+- Support OpenMP
+
 ## version 2.1
 
 - Add no blocking mode
