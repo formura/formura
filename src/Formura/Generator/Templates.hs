@@ -37,6 +37,7 @@ scaffold = do
   addHeader "<stdbool.h>"
   addHeader "<math.h>"
   addHeader "<mpi.h>"
+  when (ic ^. icWithOmp /= 0) $ addHeader "<omp.h>"
 
   let gridPerNode = ic ^. icGridPerNode
   let mkFields :: M.Map IdentName TypeExpr -> [(String, CType)]

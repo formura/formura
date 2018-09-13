@@ -83,6 +83,9 @@ defFunction setter name args rt body = do
 loop :: IsGen m => [Int] -> (Idx -> BuildM m ()) -> BuildM m ()
 loop size body = do
   let idx = [("i" ++ show i, 0, s, 1) | (i,s) <- zip [1..(length size)] size]
+  let d = length size
+  withOmp <- view (omGlobalEnvironment . envNumericalConfig . icWithOmp)
+  when (withOmp > 0) $ raw ("#pragma omp parallel for" ++ if d > 1 then " collapse(" ++ show d ++ ")" else "")
   loopWith idx body
 
 loopWith :: IsGen m => [(String,Int,Int,Int)] -> (Idx -> BuildM m ()) -> BuildM m ()
