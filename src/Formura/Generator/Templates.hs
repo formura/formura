@@ -4,12 +4,10 @@ module Formura.Generator.Templates where
 
 import Control.Lens ((^.), view)
 import Control.Monad.Writer
-import Data.Char (toLower)
 import Data.Foldable (toList, for_)
 import Data.List
 import qualified Data.Map as M
 import Data.Maybe (fromJust)
-import Data.Monoid
 import Text.Printf
 
 import Formura.NumericalConfig
@@ -18,7 +16,6 @@ import Formura.GlobalEnvironment
 import Formura.Generator.Types
 import Formura.Generator.Functions
 import Formura.Syntax
-import Formura.Vec
 
 mapType :: TypeExpr -> CType
 mapType (ElemType "Rational") = CDouble
@@ -31,10 +28,8 @@ mapType x = error $ "Unable to translate type to C:" ++ show x
 
 scaffold :: GenM ()
 scaffold = do
-  dim <- view (omGlobalEnvironment . dimension)
   ic <- view (omGlobalEnvironment . envNumericalConfig)
   axes <- view (omGlobalEnvironment . axesNames)
-  stepGraph <- view omStepGraph
 
   addHeader "<stdio.h>"
   addHeader "<stdbool.h>"
@@ -82,11 +77,11 @@ defUtilFunctions = do
       let m1:_ = mpiShape
       raw $ printf "*p1 = (int)p%%%d" m1
     2 -> do
-      let m1:m2:_ = mpiShape
+      let m1:_:_ = mpiShape
       raw $ printf "*p1 = (int)p%%%d" m1
       raw $ printf "*p2 = (int)p/%d" m1
     3 -> do
-      let m1:m2:m3:_ = mpiShape
+      let m1:m2:_:_ = mpiShape
       raw $ printf "int p4 = (int)p%%%d" (m1*m2)
       raw $ printf "*p1 = (int)p4%%%d" m1
       raw $ printf "*p2 = (int)p4/%d" m1
@@ -161,7 +156,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
           copy rslt buff empty empty
       --   - buffに壁をセット
           for_ tmpWalls $ \(flag, gs, tmpWall) -> do
-            let idx0 = (toIdx [i | (i,b) <- zip (unwrap idx) flag, not b]) >< it
+            let idx0 = (toIdx [i | (i,b) <- zip (fromIdx idx) flag, not b]) >< it
             loop gs $ \idx' ->
               tell [mkIdent f buff (idx' <> toIdx [if b then n else 0 | (b,n) <- zip flag gridPerBlock]) @= mkIdent f tmpWall (idx0 >< idx') | f <- (getFields tmpWall), f `elem` (getFields buff)]
             return ()
@@ -169,7 +164,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
           call "Formura_Step" [ref buff, ref rslt]
       --   - 壁の書き出し
           for_ tmpWalls $ \(flag, gs, tmpWall) -> do
-            let idx0 = (toIdx [i | (i,b) <- zip (unwrap idx) flag, not b]) >< it
+            let idx0 = (toIdx [i | (i,b) <- zip (fromIdx idx) flag, not b]) >< it
             loop gs $ \idx' ->
               tell [mkIdent f tmpWall (idx0 >< idx')  @= mkIdent f buff idx' | f <- (getFields buff), f `elem` (getFields tmpWall)]
             return ()
@@ -200,6 +195,7 @@ initBody = do
       r2a x | x == 0 = ""
             | x == 1 = "+1"
             | x == -1 = "-1"
+            | otherwise = error "Error in r2a"
       rank2arg r = "(" ++ intercalate "," ["i" ++ show i ++ r2a x | (i,x) <- zip [1..length r] r] ++ ")"
       ranksTable = [(formatRank r,rank2arg r) | r <- rs ]
   let set n t v = raw ("n->" ++ n ++ " = " ++ v) >> return (n, t)
@@ -232,7 +228,6 @@ calcSizes = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) a
 stepBody :: [CVariable] -> BuildM GenM ()
 stepBody args = do
   let inputSize = getSize $ variableType $ args !! 0
-      outputSize = getSize $ variableType $ args !! 1
   mmg <- view omStepGraph
   let sizeTable = calcSizes mmg
   -- 中間変数を生成するかどうかを判定する
@@ -270,8 +265,8 @@ stepBody args = do
       mapType' (ElemType "int") = CInt
       mapType' (ElemType x) = CRawType x
       mapType' _ = error "Invalid type"
-  let genMicroInst idx s mmid (Store n x) mt | tmpPrefix `isPrefixOf` n = tell [(n ++ show idx) @= formatNode x]
-                                             | otherwise = tell [(mkIdent n (args !! 1) idx) @= formatNode x]
+  let genMicroInst idx _ _ (Store n x) _ | tmpPrefix `isPrefixOf` n = tell [(n ++ show idx) @= formatNode x]
+                                         | otherwise = tell [(mkIdent n (args !! 1) idx) @= formatNode x]
       genMicroInst idx s mmid mi mt =
         let decl x = declLocalVariable Nothing (mapType' mt) (formatNode mmid) (Just x) >> return ()
         in decl $ case mi of

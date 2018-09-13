@@ -8,7 +8,6 @@ import Control.Lens
 import Control.Monad.Trans
 import Control.Monad.Writer
 import Data.List (intercalate)
-import Data.Monoid
 import Data.Traversable (for)
 import Text.Printf (printf)
 
@@ -16,7 +15,6 @@ import Formura.NumericalConfig
 import Formura.GlobalEnvironment
 import Formura.OrthotopeMachine.Graph
 import Formura.Generator.Types
-import Formura.Generator.Encode
 
 addHeader :: IsGen m => String -> m ()
 addHeader h = headers %= (++ ["#include " ++ h])
@@ -38,8 +36,8 @@ redeftype (AoS _) fs = [(n, unwrap t) | (n, t) <- fs]
   where unwrap (CArray _ t) = t
         unwrap t = t
 redeftype (SoA s) fs = [(n, wrap s t) | (n, t) <- fs]
-  where wrap s (CArray _ t) = CArray s t
-        wrap s t = CArray s t
+  where wrap s0 (CArray _ t) = CArray s0 t
+        wrap s0 t = CArray s0 t
 
 defTypeStruct :: IsGen m => (Lens' CodeStructure [CTypedef]) -> String -> [(String, CType)] -> Kind -> m CType
 defTypeStruct setter n fs k = do
@@ -47,7 +45,7 @@ defTypeStruct setter n fs k = do
   let t = case k of
             Normal -> CStruct n fs'
             AoS s -> CArray s (CStruct n fs')
-            SoA s -> CStruct n fs'
+            SoA _ -> CStruct n fs'
   setter %= (++ [CTypedefStruct fs' n])
   return t
 
@@ -117,7 +115,7 @@ mkIdent f (CVariable n t _ _) idx
     isArray _ = False
     isSoA (CStruct _ fs) = all (isArray . snd) fs
     isSoA _ = False
-    isSoA' (CPtr t) = isSoA t
+    isSoA' (CPtr t0) = isSoA t0
     isSoA' _ = False
     isAoS (CArray _ (CStruct _ _)) = True
     isAoS _ = False
@@ -130,7 +128,7 @@ l @= r = Bind l r
 
 infixl 1 @=
 
-newtype Idx = Idx { unwrap :: [String] }
+newtype Idx = Idx { fromIdx :: [String] }
 
 class IsIdx a where
   toIdx :: a -> Idx
@@ -175,6 +173,7 @@ formatRank b = intercalate "_" [f i | i <- b]
   where f x | x == 0 = "0"
             | x == 1 = "p1"
             | x == -1 = "m1"
+            | otherwise = error "Error in Formura.Generator.Functions.formatRank"
 
 sendrecv :: IsGen m => [(String,CType)] -> CVariable -> CVariable -> Int -> BuildM m ()
 sendrecv gridStruct src tgt s = do
@@ -199,10 +198,9 @@ isendrecv gridStruct src s = do
 waitAndCopy :: IsGen m => ([CVariable],[CVariable],[CVariable]) -> CVariable -> Int -> BuildM m ()
 waitAndCopy (sendReqs,recvReqs,recvBufs) tgt s = do
   bases <- view (omGlobalEnvironment . commBases)
-  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   mapM_ wait sendReqs
   mapM_ wait recvReqs
-  sequence_ [copy recvBuf tgt empty [if d == 1 then 0 else 2*s | (d,n) <- zip b gridPerNode] | (b,recvBuf) <- zip bases recvBufs]
+  sequence_ [copy recvBuf tgt empty [if d == 1 then 0 else 2*s | d <- b] | (b,recvBuf) <- zip bases recvBufs]
 
 sendTo :: IsGen m => String -> CVariable -> BuildM m CVariable
 sendTo r v = do

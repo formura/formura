@@ -43,7 +43,7 @@ instance EncodeH CVariable where
 
 instance EncodeH CTypedef where
   encodeH (CTypedef org als) = "typedef" <+> encode org <+| als
-  encodeH (CTypedefStruct fs t) = "typedef struct {\n" ++ unlines [encode (CVariable n t Nothing Nothing) | (n,t) <- fs] ++  "}" <+| t
+  encodeH (CTypedefStruct fs t0) = "typedef struct {\n" ++ unlines [encode (CVariable n t Nothing Nothing) | (n,t) <- fs] ++  "}" <+| t0
 
 instance EncodeH CFunction where
   encodeH (CFunction fn rt ag _) = encode rt <+> fn ++ parens (map (encode . fst) ag) ++ ";"
@@ -58,8 +58,8 @@ instance Encode CVariable where
   encode (CVariable n t mv ml) = let with (Just l) s = l <+> s
                                      with Nothing s = s
 
-                                     decl (CArray s t) n = encode t <+> n ++ encode s
-                                     decl t n = encode t <+> n
+                                     decl (CArray s t0) n0 = encode t0 <+> n0 ++ encode s
+                                     decl t0 n0 = encode t0 <+> n0
                                   in case mv of
                                       (Just v) -> with ml (decl t n <+> "=" <+| v)
                                       Nothing -> with ml (decl t n ++ ";")
