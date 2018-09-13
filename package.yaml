@@ -1,5 +1,5 @@
 name: formura
-version: '2.0'
+version: '2.1'
 synopsis: Formura is a simple language to describe stencil computation.
 category: Language
 author: Takayuki Muranushi, Youhei Ishihara
@@ -36,7 +36,6 @@ library:
   - either
   - filepath
   - gitrev
-  - heterocephalus
   - lattices
   - mmorph
   - optparse-applicative
