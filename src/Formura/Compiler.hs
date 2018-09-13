@@ -12,7 +12,7 @@ import           Control.Applicative
 import           Control.Lens
 import           Control.Monad.Morph
 import "mtl"     Control.Monad.RWS
-import           Control.Monad.Trans.Either
+import "mtl"     Control.Monad.Except
 import qualified Data.Set as S
 import           System.Exit
 import           System.IO
@@ -36,9 +36,9 @@ defaultCompilerSyntacticState = CompilerSyntacticState Nothing ""
 
 -- | The formura compiler monad.
 newtype CompilerMonad r w s a = CompilerMonad
-  { runCompilerMonad :: EitherT CompilerError (RWST r w s IO) a }
+  { runCompilerMonad :: ExceptT CompilerError (RWST r w s IO) a }
   deriving (Functor, Applicative, Monad,
-            MonadIO, MonadReader r, MonadState s, MonadWriter w)
+            MonadIO, MonadReader r, MonadState s, MonadWriter w, MonadError CompilerError)
 
 compileErrMsg :: (HasCompilerSyntacticState s, MonadState s m) => P.Err -> m Ppr.Doc
 compileErrMsg errMsg = do
@@ -56,16 +56,16 @@ compileErrMsg errMsg = do
 instance (HasCompilerSyntacticState s, Monoid w) => P.Errable (CompilerMonad r w s) where
   raiseErr errMsg = do
     msg2 <- compileErrMsg errMsg
-    CompilerMonad $ left msg2
+    CompilerMonad $ throwError msg2
 
 -- | Run the compiler and get the result.
 evalCompiler :: CompilerMonad r w s a -> r -> s -> IO (Either CompilerError a)
-evalCompiler m r s = fst <$> evalRWST (runEitherT $ runCompilerMonad m) r s
+evalCompiler m r s = fst <$> evalRWST (runExceptT $ runCompilerMonad m) r s
 
 -- | Run the compiler and get the state and written results.
 --   Note that you get some partial results even when the compilation aborts.
 runCompiler :: CompilerMonad r w s a -> r -> s -> IO (Either CompilerError a,s,w)
-runCompiler m r s = runRWST (runEitherT $ runCompilerMonad m) r s
+runCompiler m r s = runRWST (runExceptT $ runCompilerMonad m) r s
 
 -- | Run the compiler and get the state and written results.
 --   In case of error, print out the error message and exit.
