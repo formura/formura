@@ -1,5 +1,5 @@
 CC = mpicc
-CCFLAG = -Wall -std=c99 -O3 -ffast-math -mavx2 -mfma
+CCFLAG = -Wall -std=c11 -O3 -ffast-math -mavx2 -mfma -fopenmp
 CCLIBS = -lm
 .SUFFIXES:
 .PRECIOUS: %.s
