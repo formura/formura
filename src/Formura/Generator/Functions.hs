@@ -236,3 +236,6 @@ raw :: IsGen m => String -> BuildM m ()
 raw c = do
   tell [Raw c]
   return ()
+
+statement :: IsGen m => String -> BuildM m ()
+statement s = raw $ s ++ ";"

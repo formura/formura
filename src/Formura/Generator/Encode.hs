@@ -87,7 +87,7 @@ instance Encode CStatement where
   encode (Bind lhs rhs) = lhs <+> "=" <+| rhs
   encode (Loop idx body) = foldr (\(n,i0,i1,di) acc -> printf "for(int %s = %d; %s < %d; %s += %d) {\n%s}\n" n i0 n i1 n di acc) (unlines $ map encode body) idx
   encode (Call fn args) = fn ++ parens args ++ ";"
-  encode (Raw c) = c ++ ";"
+  encode (Raw c) = c
 
 parens :: [String] -> String
 parens xs = "(" ++ intercalate "," xs ++ ")"

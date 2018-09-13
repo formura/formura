@@ -66,28 +66,28 @@ defUtilFunctions = do
   defLocalFunction "Formura_Encode_rank" encodeRankArg CInt $ \_ -> case dim of
     1 -> do
       let m1:_ = mpiShape
-      raw $ printf "return (p1+%d)%%%d" m1 m1
+      statement $ printf "return (p1+%d)%%%d" m1 m1
     2 -> do
       let m1:m2:_ = mpiShape
-      raw $ printf "return ((p1+%d)%%%d + %d*(p2+%d)%%%d)" m1 m1 m1 m2 m2
+      statement $ printf "return ((p1+%d)%%%d + %d*(p2+%d)%%%d)" m1 m1 m1 m2 m2
     3 -> do
       let m1:m2:m3:_ = mpiShape
-      raw $ printf "return ((p1+%d)%%%d + %d*(p2+%d)%%%d + %d*(p3+%d)%%%d)" m1 m1 m1 m2 m2 (m1*m2) m3 m3
+      statement $ printf "return ((p1+%d)%%%d + %d*(p2+%d)%%%d + %d*(p3+%d)%%%d)" m1 m1 m1 m2 m2 (m1*m2) m3 m3
     _ -> error "No support"
   defLocalFunction "Formura_Decode_rank" decodeRankArg CVoid $ \_ -> case dim of
     1 -> do
       let m1:_ = mpiShape
-      raw $ printf "*p1 = (int)p%%%d" m1
+      statement $ printf "*p1 = (int)p%%%d" m1
     2 -> do
       let m1:_:_ = mpiShape
-      raw $ printf "*p1 = (int)p%%%d" m1
-      raw $ printf "*p2 = (int)p/%d" m1
+      statement $ printf "*p1 = (int)p%%%d" m1
+      statement $ printf "*p2 = (int)p/%d" m1
     3 -> do
       let m1:m2:_:_ = mpiShape
-      raw $ printf "int p4 = (int)p%%%d" (m1*m2)
-      raw $ printf "*p1 = (int)p4%%%d" m1
-      raw $ printf "*p2 = (int)p4/%d" m1
-      raw $ printf "*p3 = (int)p/%d" (m1*m2)
+      statement $ printf "int p4 = (int)p%%%d" (m1*m2)
+      statement $ printf "*p1 = (int)p4%%%d" m1
+      statement $ printf "*p2 = (int)p4/%d" m1
+      statement $ printf "*p3 = (int)p/%d" (m1*m2)
     _ -> error "No support"
 
   axes <- view (omGlobalEnvironment . axesNames)
@@ -95,7 +95,7 @@ defUtilFunctions = do
   sleeve <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
   let totalGrid = zipWith (*) gridPerNode mpiShape
   let toPosBody a l = do
-        raw $ printf "return d%s*((i+n.offset_%s - (%d*n.time_step)%%%d + %d)%%%d)" a a sleeve l l l
+        statement $ printf "return d%s*((i+n.offset_%s - (%d*n.time_step)%%%d + %d)%%%d)" a a sleeve l l l
   for_ (zip axes totalGrid) $ \(a,l) ->
     defGlobalFunction ("to_pos_"++a) [(CInt, "i"), (CRawType "Formura_Navi", "n")] CDouble (\_ -> toPosBody a l)
 
@@ -116,7 +116,7 @@ noBlocking gridStruct globalData = do
   -- 結果の書き出し
   copy rslt globalData empty empty
   -- time_step を更新
-  raw "n->time_step += 1"
+  statement "n->time_step += 1"
   return (buffType, rsltType)
 
 temporalBlocking :: [(String,CType)] -> CVariable -> [Int] -> [Int] -> Int -> BuildM GenM (CType, CType)
@@ -177,21 +177,21 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
   waitAndCopy rs tmpFloor (s*nt)
   mapM_ update bs
   copy tmpFloor globalData empty empty
-  raw $ "n->time_step += " ++ show nt
+  statement $ "n->time_step += " ++ show nt
   return (buffType, rsltType)
 
 initBody :: BuildM GenM ()
 initBody = do
-  raw "int size, rank"
-  raw "MPI_Comm_size(comm, &size)"
-  raw "MPI_Comm_rank(comm, &rank)"
+  statement "int size, rank"
+  statement "MPI_Comm_size(comm, &size)"
+  statement "MPI_Comm_rank(comm, &rank)"
   axes <- view (omGlobalEnvironment . axesNames)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
   mpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
   dim <- view (omGlobalEnvironment . dimension)
   bases <- view (omGlobalEnvironment . commBases)
-  raw $ "int " ++ intercalate "," ["i" ++ show i | i <- [1..dim]]
+  statement $ "int " ++ intercalate "," ["i" ++ show i | i <- [1..dim]]
   call "Formura_Decode_rank" ("rank":["&i"++show i | i <- [1..dim]])
   let rs = bases ++ [map negate b | b <- bases]
       r2a x | x == 0 = ""
@@ -200,7 +200,7 @@ initBody = do
             | otherwise = error "Error in r2a"
       rank2arg r = "(" ++ intercalate "," ["i" ++ show i ++ r2a x | (i,x) <- zip [1..length r] r] ++ ")"
       ranksTable = [(formatRank r,rank2arg r) | r <- rs ]
-  let set n t v = raw ("n->" ++ n ++ " = " ++ v) >> return (n, t)
+  let set n t v = statement ("n->" ++ n ++ " = " ++ v) >> return (n, t)
   myRank <- set "my_rank" CInt "rank"
   timeStep <- set "time_step" CInt "0"
   mpiWorld <- set "mpi_world" (CRawType "MPI_Comm") "comm"
