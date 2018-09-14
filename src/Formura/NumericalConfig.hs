@@ -27,6 +27,7 @@ data NumericalConfig = NumericalConfig
   , _ncGridPerBlock :: Maybe (Vec Int)
   , _ncTemporalBlockingInterval :: Maybe Int
   , _ncMPIShape :: Vec Int
+  , _ncWithOmp :: Maybe Int
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
 
 makeClassy ''NumericalConfig
@@ -57,6 +58,7 @@ decodeConfig str = check =<< first ConfigException (Y.decodeEither str)
               | null (cfg ^. ncMPIShape) = Left $ ConfigException "mpi_shape should be a nonempty list"
               | maybe False null (cfg ^. ncGridPerBlock) = Left $ ConfigException "grid_per_block should be a nonempty list"
               | maybe False (< 1) (cfg ^. ncTemporalBlockingInterval) = Left $ ConfigException "temporal_blocking_interval should be a positive integer"
+              | maybe False (\i -> i `notElem` [0,1,2]) (cfg ^. ncWithOmp) = Left $ ConfigException "with_omp should be 0, 1 or 2"
               | otherwise = Right cfg
 
 readConfig :: FilePath -> IO NumericalConfig
@@ -82,6 +84,7 @@ data InternalConfig = InternalConfig
   , _icBlockingType :: BlockingType
   , _icSleeve :: Int
   , _icMPIShape :: [Int]
+  , _icWithOmp :: Int
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
 
 makeClassy ''InternalConfig
@@ -94,6 +97,7 @@ defaultInternalConfig = InternalConfig
   , _icBlockingType = NoBlocking
   , _icSleeve = 1
   , _icMPIShape = []
+  , _icWithOmp = 0
   }
 
 convertConfig :: Int -> NumericalConfig -> Either ConfigException InternalConfig
@@ -116,6 +120,7 @@ convertConfig s nc = check ic
           , _icBlockingType = bt
           , _icSleeve = s
           , _icMPIShape = toList $ nc ^. ncMPIShape
+          , _icWithOmp = fromMaybe 0 $ nc ^. ncWithOmp
           }
     -- 値が制約を満たすか確認
     check :: InternalConfig -> Either ConfigException InternalConfig

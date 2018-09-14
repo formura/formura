@@ -24,6 +24,7 @@ spec = do
                   , _ncMPIShape = Vec [1]
                   , _ncGridPerBlock = Just (Vec [10])
                   , _ncTemporalBlockingInterval = Just 5
+                  , _ncWithOmp = Nothing
                   }
       decodeConfig cfg `shouldBe` (Right cfg')
     it "3d config with Temporal blocking" $ do
@@ -32,6 +33,7 @@ spec = do
                           , "temporal_blocking_interval: 5"
                           , "grid_per_node: [10,10,10]"
                           , "grid_per_block: [10,10,10]"
+                          , "with_omp: 1"
                           ]
           cfg' = NumericalConfig
                   { _ncLengthPerNode = Vec [1.0,2.0,3.0]
@@ -39,6 +41,7 @@ spec = do
                   , _ncMPIShape = Vec [2,2,2]
                   , _ncGridPerBlock = Just (Vec [10,10,10])
                   , _ncTemporalBlockingInterval = Just 5
+                  , _ncWithOmp = Just 1
                   }
       decodeConfig cfg `shouldBe` (Right cfg')
     it "3d config without Temporal blocking" $ do
@@ -52,6 +55,7 @@ spec = do
                   , _ncMPIShape = Vec [2,2,2]
                   , _ncGridPerBlock = Nothing 
                   , _ncTemporalBlockingInterval = Nothing
+                  , _ncWithOmp = Nothing
                   }
       decodeConfig cfg `shouldBe` (Right cfg')
   describe "Invalid case" $ do
