@@ -115,7 +115,7 @@ noBlocking gridStruct globalData = do
   -- 通信
   sendrecv gridStruct globalData buff s
 
-  copy globalData buff empty empty
+  copy globalData buff empty (repeat $ 2*s)
   -- 1ステップ更新
   call "Formura_Step" [ref buff, ref rslt]
   -- 結果の書き出し
