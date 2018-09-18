@@ -19,6 +19,9 @@ import Formura.Generator.Types
 addHeader :: IsGen m => String -> m ()
 addHeader h = headers %= (++ ["#include " ++ h])
 
+defineParam :: IsGen m => String -> String -> m ()
+defineParam n v = definedParams %= (++ ["#define " ++ n ++ " " ++ v])
+
 defType :: IsGen m => (Lens' CodeStructure [CTypedef]) -> String -> CType -> m CType
 defType setter als org = do
   setter %= (++ [CTypedef org als])

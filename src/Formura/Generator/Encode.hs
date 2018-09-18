@@ -14,6 +14,7 @@ render cs = (hContent, cContent)
     encodesWith f getter = map f (cs ^. getter)
     hContent = unlines $ ["#pragma once"]
                       ++ encodesWith encodeH headers
+                      ++ encodesWith encodeH definedParams
                       ++ encodesWith encodeH globalTypes
                       ++ encodesWith encodeH globalVariables
                       ++ encodesWith encodeH globalFunctions

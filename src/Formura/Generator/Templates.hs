@@ -40,6 +40,10 @@ scaffold = do
   when (ic ^. icWithOmp /= 0) $ addHeader "<omp.h>"
 
   let gridPerNode = ic ^. icGridPerNode
+  defineParam "Ns" (show $ ic ^. icSleeve)
+  sequence_ [defineParam ("L" ++ show i) (show v) | (i,v) <- zip [1..] gridPerNode]
+  sequence_ [defineParam ("P" ++ show i) (show v) | (i,v) <- zip [1..] (ic ^. icMPIShape)]
+
   let mkFields :: M.Map IdentName TypeExpr -> [(String, CType)]
       mkFields = M.foldrWithKey (\k t acc -> (k, mapType t):acc) []
   gridStruct <- mkFields <$> view omStateSignature

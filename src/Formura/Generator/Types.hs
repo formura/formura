@@ -55,6 +55,7 @@ data CFunction = CFunction
 
 data CodeStructure = CodeStructure
   { _headers :: [String]
+  , _definedParams :: [String]
   , _globalVariables :: [CVariable]
   , _globalTypes :: [CTypedef]
   , _localTypes :: [CTypedef]
@@ -71,7 +72,7 @@ newtype GenM a = GenM { unwrapGenM :: ReaderT MMProgram (State CodeStructure) a 
 
 generate :: MMProgram -> String -> String -> GenM () -> CodeStructure
 generate mm hfn cfn = (flip execState) cs0 . (flip runReaderT) mm . unwrapGenM
-  where cs0 = CodeStructure [] [] [] [] [] [] hfn cfn
+  where cs0 = CodeStructure [] [] [] [] [] [] [] hfn cfn
 
 newtype BuildM m a = BuildM { unwrapBuildM :: WriterT [CStatement] m a }
   deriving (Functor, Applicative, Monad)
