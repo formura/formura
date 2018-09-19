@@ -74,10 +74,10 @@ defUtilFunctions = do
       statement $ printf "return (p1+%d)%%%d" m1 m1
     2 -> do
       let m1:m2:_ = mpiShape
-      statement $ printf "return ((p1+%d)%%%d + %d*(p2+%d)%%%d)" m1 m1 m1 m2 m2
+      statement $ printf "return ((p1+%d)%%%d + %d*((p2+%d)%%%d))" m1 m1 m1 m2 m2
     3 -> do
       let m1:m2:m3:_ = mpiShape
-      statement $ printf "return ((p1+%d)%%%d + %d*(p2+%d)%%%d + %d*(p3+%d)%%%d)" m1 m1 m1 m2 m2 (m1*m2) m3 m3
+      statement $ printf "return ((p1+%d)%%%d + %d*((p2+%d)%%%d) + %d*((p3+%d)%%%d))" m1 m1 m1 m2 m2 (m1*m2) m3 m3
     _ -> error "No support"
   defLocalFunction "Formura_Decode_rank" decodeRankArg CVoid $ \_ -> case dim of
     1 -> do
