@@ -19,7 +19,7 @@ import Formura.OrthotopeMachine.Graph
 genCode :: WithCommandLineOption => MMProgram -> IO ()
 genCode mm = do
   let ic = mm ^. omGlobalEnvironment . envNumericalConfig
-  let totalMPI = product $ ic ^. icMPIShape
+  let totalMPI = product <$> ic ^. icMPIShape
 
   let cs = generate mm hxxFilePath cxxFilePath scaffold
       (hContent, cContent) = render cs
@@ -35,13 +35,18 @@ genCode mm = do
                      , "  " ++ runningScriptPath
                      ]
 
-genRunningScript :: String -> Int -> IO ()
-genRunningScript fn n = do
-  let script = unlines ["#!/bin/bash"
-                       ,"prog=${1:?Need an executable file path}"
-                       ,"opt=${2}"
-                       ,"mpirun ${opt} -n " ++ show n ++ " ${prog}"
-                       ]
+genRunningScript :: String -> Maybe Int -> IO ()
+genRunningScript fn mn = do
+  let script = unlines $ case mn of
+        Nothing -> ["#!/bin/bash"
+                   ,"prog=${1:?Need an executable file path}"
+                   ,"${prog}"
+                   ]
+        Just n -> ["#!/bin/bash"
+                  ,"prog=${1:?Need an executable file path}"
+                  ,"opt=${2}"
+                  ,"mpirun ${opt} -n " ++ show n ++ " ${prog}"
+                  ]
   writeFile fn script
   p <- getPermissions fn
   setPermissions fn $ p {executable = True}
