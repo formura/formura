@@ -58,6 +58,7 @@ scaffold = do
   defUtilFunctions
 
   defGlobalFunction "Formura_Init" [(CInt, "argc"),(CRawType "char **", "argv"),(CRawType "Formura_Navi *","n"),(CRawType "MPI_Comm","comm")] CVoid (\_ -> initBody)
+  defGlobalFunction "Formura_Finalize" [] CVoid (\_ -> finalizeBody)
   let forwardBody = case (ic ^. icBlockingType) of
                       NoBlocking -> (noBlocking gridStruct globalData)
                       TemporalBlocking gpb bpn nt -> temporalBlocking gridStruct globalData gpb bpn nt
@@ -239,6 +240,12 @@ initBody = do
   defGlobalTypeStruct "Formura_Navi" navi Normal
   return ()
 
+finalizeBody :: BuildM GenM ()
+finalizeBody = do
+  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  case mmpiShape of
+    Nothing -> return ()
+    Just _ -> call "MPI_Finalize" []
 
 -- Manifestノードの配列サイズを計算する
 -- もとの配列サイズ NX+2Ns に比べてどれだけ小さいかを求める
