@@ -57,7 +57,10 @@ scaffold = do
   
   defUtilFunctions
 
-  defGlobalFunction "Formura_Init" [(CInt, "argc"),(CRawType "char **", "argv"),(CRawType "Formura_Navi *","n"),(CRawType "MPI_Comm","comm")] CVoid (\_ -> initBody)
+  navi <- defGlobalFunction "Formura_Init" [(CInt, "argc"),(CRawType "char **", "argv"),(CRawType "Formura_Navi *","n")] CVoid (\_ -> initBody "MPI_COMM_WORLD")
+  defGlobalTypeStruct "Formura_Navi" navi Normal
+  when (isJust $ ic ^. icMPIShape) $
+    () <$ defGlobalFunction "Formura_Custom_Init" [(CInt, "argc"),(CRawType "char **", "argv"),(CRawType "Formura_Navi *","n"),(CRawType "MPI_Comm", "comm")] CVoid (\_ -> initBody "comm")
   defGlobalFunction "Formura_Finalize" [] CVoid (\_ -> finalizeBody)
   let forwardBody = case (ic ^. icBlockingType) of
                       NoBlocking -> (noBlocking gridStruct globalData)
@@ -191,13 +194,14 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
   statement $ "n->time_step += " ++ show nt
   return (buffType, rsltType)
 
-setupMPI :: [Int] -> BuildM GenM [(String, CType)]
-setupMPI mpiShape = do
+setupMPI :: String -> BuildM GenM [(String, CType)]
+setupMPI comm = do
   dim <- view (omGlobalEnvironment . dimension)
   call "MPI_Init" ["&argc", "&argv"]
+  declLocalVariable Nothing (CRawType "MPI_Comm") "cm" (Just comm)
   statement "int size, rank"
-  statement "MPI_Comm_size(comm, &size)"
-  statement "MPI_Comm_rank(comm, &rank)"
+  statement "MPI_Comm_size(cm, &size)"
+  statement "MPI_Comm_rank(cm, &rank)"
   bases <- view (omGlobalEnvironment . commBases)
   statement $ "int " ++ intercalate "," ["i" ++ show i | i <- [1..dim]]
   call "Formura_Decode_rank" ("rank":["&i"++show i | i <- [1..dim]])
@@ -210,12 +214,12 @@ setupMPI mpiShape = do
       ranksTable = [(formatRank r,rank2arg r) | r <- rs ]
   let set n t v = statement ("n->" ++ n ++ " = " ++ v) >> return (n, t)
   myRank <- set "my_rank" CInt "rank"
-  mpiWorld <- set "mpi_world" (CRawType "MPI_Comm") "comm"
+  mpiWorld <- set "mpi_world" (CRawType "MPI_Comm") "cm"
   ranks <- mapM (\(r,ag) -> set ("rank_" ++ r) CInt ("Formura_Encode_rank" ++ ag)) ranksTable
   return $ [myRank,mpiWorld] <> ranks
 
-initBody :: BuildM GenM ()
-initBody = do
+initBody :: String -> BuildM GenM [(String,CType)]
+initBody comm = do
   axes <- view (omGlobalEnvironment . axesNames)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
@@ -229,7 +233,7 @@ initBody = do
             lengthes <- mapM (\(a,v) -> set ("length_" ++ a) CDouble (show v)) $ zip axes lengthPerNode
             return $ [myRank] <> offsets <> lengthes
           Just mpiShape -> do
-            fs' <- setupMPI mpiShape
+            fs' <- setupMPI comm
             offsets <- mapM (\(a,i,l) -> set ("offset_" ++ a) CInt (show l++"*i"++show i)) $ zip3 axes [1..dim] gridPerNode
             lengthes <- mapM (\(a,v) -> set ("length_" ++ a) CDouble (show v)) $ zip axes $ zipWith (\l m -> l * fromIntegral m) lengthPerNode mpiShape
             return $  fs' <> offsets <> lengthes
@@ -237,8 +241,7 @@ initBody = do
   lowers <- mapM (\a -> set ("lower_" ++ a) CInt "0") axes
   uppers <- mapM (\(a,v) -> set ("upper_" ++ a) CInt (show v)) $ zip axes gridPerNode
   let navi = [timeStep] <> lowers <> uppers <> fs
-  defGlobalTypeStruct "Formura_Navi" navi Normal
-  return ()
+  return navi
 
 finalizeBody :: BuildM GenM ()
 finalizeBody = do
