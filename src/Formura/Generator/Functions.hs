@@ -7,6 +7,7 @@ module Formura.Generator.Functions where
 import Control.Lens
 import Control.Monad.Trans
 import Control.Monad.Writer
+import Data.Maybe (isJust)
 import Data.List (intercalate)
 import Data.Traversable (for)
 import Text.Printf (printf)
@@ -188,24 +189,30 @@ sendrecv gridStruct src tgt s = do
 
 isendrecv :: IsGen m => [(String,CType)] -> CVariable -> Int -> BuildM m ([CVariable],[CVariable],[CVariable])
 isendrecv gridStruct src s = do
+  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
   bases <- view (omGlobalEnvironment . commBases)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   commType <- defLocalTypeStruct "Formura_Comm_Buf" gridStruct Normal
   fmap unzip3 $ for bases $ \b -> do
     let r = formatRank b
-    sendbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("send_buf_" ++ r) Nothing
-    copy src sendbuf [if d == 1 then n-2*s else 0 | (d,n) <- zip b gridPerNode] empty
-    sendReq <- sendTo r sendbuf
     let r' = formatRank $ map negate b
+    sendbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("send_buf_" ++ r) Nothing
     recvbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("recv_buf_" ++ r') Nothing
-    recvReq <- recvFrom r' recvbuf
+    copy src sendbuf [if d == 1 then n-2*s else 0 | (d,n) <- zip b gridPerNode] empty
+    (sendReq, recvReq) <- case mmpiShape of
+                            Nothing -> copy sendbuf recvbuf empty empty >> return (sendbuf,recvbuf) -- この返り値はよくないが妥協した
+                            Just _ -> (,) <$> sendTo r sendbuf <*> recvFrom r' recvbuf
+    -- sendReq <- sendTo r sendbuf
+    -- recvReq <- recvFrom r' recvbuf
     return (sendReq, recvReq, recvbuf)
 
 waitAndCopy :: IsGen m => ([CVariable],[CVariable],[CVariable]) -> CVariable -> Int -> BuildM m ()
 waitAndCopy (sendReqs,recvReqs,recvBufs) tgt s = do
   bases <- view (omGlobalEnvironment . commBases)
-  mapM_ wait sendReqs
-  mapM_ wait recvReqs
+  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  when (isJust mmpiShape) $ do
+    mapM_ wait sendReqs
+    mapM_ wait recvReqs
   sequence_ [copy recvBuf tgt empty [if d == 1 then 0 else 2*s | d <- b] | (b,recvBuf) <- zip bases recvBufs]
 
 sendTo :: IsGen m => String -> CVariable -> BuildM m CVariable
