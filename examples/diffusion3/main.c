@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <math.h>
-#include <mpi.h>
 #include "diffusion3.h"
 
 #define T_MAX 100
@@ -75,10 +74,8 @@ void writeData(Formura_Navi n) {
 }
 
 int main(int argc, char **argv) {
-  MPI_Init(&argc,&argv);
-
   Formura_Navi n;
-  Formura_Init(&n, MPI_COMM_WORLD);
+  Formura_Init(argc, argv, &n);
   setup(n);
 
   writeData(n);
@@ -87,6 +84,6 @@ int main(int argc, char **argv) {
     writeData(n);
   }
 
-  MPI_Finalize();
+  Formura_Finalize();
   return 0;
 }
