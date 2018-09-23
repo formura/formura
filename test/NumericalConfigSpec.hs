@@ -21,7 +21,7 @@ spec = do
           cfg' = NumericalConfig
                   { _ncLengthPerNode = Vec [1.0]
                   , _ncGridPerNode = Vec [10]
-                  , _ncMPIShape = Vec [1]
+                  , _ncMPIShape = Just $ Vec [1]
                   , _ncGridPerBlock = Just (Vec [10])
                   , _ncTemporalBlockingInterval = Just 5
                   , _ncWithOmp = Nothing
@@ -38,7 +38,7 @@ spec = do
           cfg' = NumericalConfig
                   { _ncLengthPerNode = Vec [1.0,2.0,3.0]
                   , _ncGridPerNode = Vec [10,10,10]
-                  , _ncMPIShape = Vec [2,2,2]
+                  , _ncMPIShape = Just $ Vec [2,2,2]
                   , _ncGridPerBlock = Just (Vec [10,10,10])
                   , _ncTemporalBlockingInterval = Just 5
                   , _ncWithOmp = Just 1
@@ -52,7 +52,7 @@ spec = do
           cfg' = NumericalConfig
                   { _ncLengthPerNode = Vec [1.0,2.0,3.0]
                   , _ncGridPerNode = Vec [10,10,10]
-                  , _ncMPIShape = Vec [2,2,2]
+                  , _ncMPIShape = Just $ Vec [2,2,2]
                   , _ncGridPerBlock = Nothing 
                   , _ncTemporalBlockingInterval = Nothing
                   , _ncWithOmp = Nothing
@@ -61,7 +61,6 @@ spec = do
   describe "Invalid case" $ do
     it "don't exist MUST fields" $ do
       let cfg = B.unlines [ "length_per_node: [1.0]"
-                          , "grid_per_node: [10]"
                           , "grid_per_block: [10]"
                           ]
       decodeConfig cfg `shouldSatisfy` isLeft
