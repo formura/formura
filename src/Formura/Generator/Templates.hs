@@ -69,6 +69,7 @@ scaffold = do
   (buffType, rsltType) <- defGlobalFunction "Formura_Forward" [(CRawType "Formura_Navi *", "n")] CVoid (\_ -> forwardBody)
   dim <- view (omGlobalEnvironment . dimension)
   let blockOffset = [(CInt, "block_offset_" ++ show i) | i <- [1..dim]]
+  defLocalFunction "Formura_Setup" ([(CRawType "Formura_Navi", "n")] ++ blockOffset) CVoid (setupBody globalData)
   defLocalFunction "Formura_Step" ([(CPtr buffType, "buff"), (CPtr rsltType, "rslt"),(CRawType "Formura_Navi", "n")] ++ blockOffset) CVoid stepBody
 
 defUtilFunctions :: GenM ()
@@ -252,6 +253,7 @@ initBody comm = do
   lowers <- mapM (\a -> set ("lower_" ++ a) CInt "0") axes
   uppers <- mapM (\(a,v) -> set ("upper_" ++ a) CInt (show v)) $ zip axes gridPerNode
   totals <- mapM (\(a,v) -> set ("total_grid_" ++ a) CInt (show v)) $ zip axes totalGrid
+  call "Formura_Setup" ("*n":replicate dim "0")
   let navi = [timeStep] <> lowers <> uppers <> totals <> fs
   return navi
 
@@ -262,23 +264,35 @@ finalizeBody = do
     Nothing -> return ()
     Just _ -> call "MPI_Finalize" []
 
+setupBody :: CVariable -> [CVariable] -> BuildM GenM ()
+setupBody globalData _ = do
+  mmg <- view omInitGraph
+  mkKernel mmg [globalData,globalData]
+
+stepBody :: [CVariable] -> BuildM GenM ()
+stepBody args = do
+  mmg <- view omStepGraph
+  mkKernel mmg args
+
 -- Manifestノードの配列サイズを計算する
 -- もとの配列サイズ NX+2Ns に比べてどれだけ小さいかを求める
 calcSizes :: MMGraph -> M.Map OMNodeID Int
 calcSizes = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) acc) M.empty
   where
     worker :: MMInstruction -> M.Map OMNodeID Int -> Int
-    worker mi tbl = maximum $ M.foldr go [] mi
+    worker mi tbl = maximum' $ M.foldr go [] mi
       where go (Node (LoadCursorStatic s _) _ _) acc = (maximum $ abs s):acc
             go (Node (LoadCursor s oid) _ _) acc = let s' = maximum $ abs s
                                                        n0 = tbl M.! oid
                                                     in  (n0+s'):acc
             go _ acc = acc
 
-stepBody :: [CVariable] -> BuildM GenM ()
-stepBody args = do
+            maximum' [] = 0
+            maximum' x = maximum x
+
+mkKernel :: MMGraph -> [CVariable] -> BuildM GenM ()
+mkKernel mmg args = do
   let inputSize = getSize $ variableType $ args !! 0
-  mmg <- view omStepGraph
   let sizeTable = calcSizes mmg
   axes <- view (omGlobalEnvironment . axesNames)
   -- 中間変数を生成するかどうかを判定する
