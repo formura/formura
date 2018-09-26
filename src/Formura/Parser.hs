@@ -19,14 +19,13 @@ module Formura.Parser where
 import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
-import           Data.Char (isAlphaNum, isLetter, isPrint, isSpace, toLower)
+import           Data.Char (isAlphaNum, isLetter, isPrint, isSpace)
 import           Data.Either (partitionEithers)
 import           Data.Foldable (toList)
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Ratio
 import qualified Data.Set as S
-import           Data.Scientific
 import qualified Text.Parser.Expression as X
 import qualified Text.PrettyPrint.ANSI.Leijen as Ppr
 import           Text.Trifecta hiding (ident)
@@ -502,16 +501,12 @@ program nc0 = do
   -- let nc = nc0 & ncOptionStrings %~ ((?commandLineOption ^. auxNumericalConfigOptions) ++)
   let ivars = head [x | AxesDeclaration x <- decls]
 
-      extentVarNames :: [IdentName]
-      extentVarNames = map (("d" ++) . map toLower) ivars
+      mkExtentStmt :: IdentName -> Rational -> StatementF RExpr
+      mkExtentStmt x v = SubstF (Ident x) (Imm v)
 
-      mkExtentStmt :: IdentName -> Scientific -> Int -> StatementF RExpr
-      mkExtentStmt x l n = SubstF (Ident x) (Imm $  ln % (ld * fromIntegral n))
-        where 
-          l' = toRational l
-          ln = numerator l'
-          ld = denominator l'
-
-      globalExtentStmts = zipWith3 mkExtentStmt extentVarNames (toList $ nc0 ^. ncLengthPerNode) (toList $ nc0 ^. ncGridPerNode)
+      spacialIntervals = zipWith (\l n -> let l' = toRational l in (numerator l') % ((denominator l') * fromIntegral n)) (toList $ nc0 ^. ncLengthPerNode) (toList $ nc0 ^. ncGridPerNode)
+      totalLengthes = zipWith (\l n -> fromIntegral n * toRational l) (toList $ nc0 ^. ncLengthPerNode) (maybe (repeat 1) toList $ nc0 ^. ncMPIShape)
+      globalExtentStmts = zipWith mkExtentStmt ["d" ++ a | a <- ivars] spacialIntervals
+                       ++ zipWith mkExtentStmt ["length_" ++ a | a <- ivars] totalLengthes
 
   return $ Program decls (BindingF $ globalExtentStmts ++ concat stmts) nc0
