@@ -31,7 +31,7 @@ void writeData(Formura_Navi n) {
 
 int main(int argc, char **argv) {
   Formura_Navi n;
-  Formura_Init(argc, argv, &n);
+  Formura_Init(&argc, &argv, &n);
   setup(n);
 
   writeData(n);
