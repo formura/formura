@@ -34,6 +34,7 @@ scaffold = do
   insntaceName <- view (omGlobalEnvironment . gridStructInstanceName)
 
   addHeader "<stdio.h>"
+  addHeader "<stdlib.h>"
   addHeader "<stdbool.h>"
   addHeader "<math.h>"
   when (isJust $ ic ^. icMPIShape) $ addHeader "<mpi.h>"
@@ -57,10 +58,10 @@ scaffold = do
   
   defUtilFunctions
 
-  navi <- defGlobalFunction "Formura_Init" [(CInt, "argc"),(CRawType "char **", "argv"),(CRawType "Formura_Navi *","n")] CVoid (\_ -> initBody "MPI_COMM_WORLD")
+  navi <- defGlobalFunction "Formura_Init" [(CPtr CInt, "argc"),(CRawType "char ***", "argv"),(CRawType "Formura_Navi *","n")] CVoid (\_ -> initBody "MPI_COMM_WORLD")
   defGlobalTypeStruct "Formura_Navi" navi Normal
   when (isJust $ ic ^. icMPIShape) $
-    () <$ defGlobalFunction "Formura_Custom_Init" [(CInt, "argc"),(CRawType "char **", "argv"),(CRawType "Formura_Navi *","n"),(CRawType "MPI_Comm", "comm")] CVoid (\_ -> initBody "comm")
+    () <$ defGlobalFunction "Formura_Custom_Init" [(CRawType "Formura_Navi *","n"),(CRawType "MPI_Comm", "comm")] CVoid (\_ -> initBody "comm")
   defGlobalFunction "Formura_Finalize" [] CVoid (\_ -> finalizeBody)
   let forwardBody = case (ic ^. icBlockingType) of
                       NoBlocking -> (noBlocking gridStruct globalData)
@@ -194,14 +195,16 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
   statement $ "n->time_step += " ++ show nt
   return (buffType, rsltType)
 
-setupMPI :: String -> BuildM GenM [(String, CType)]
-setupMPI comm = do
+setupMPI :: [Int] -> String -> BuildM GenM [(String, CType)]
+setupMPI mpiShape comm = do
+  let p0 = product mpiShape
   dim <- view (omGlobalEnvironment . dimension)
-  call "MPI_Init" ["&argc", "&argv"]
+  when (comm == "MPI_COMM_WORLD") $ call "MPI_Init" ["argc", "argv"]
   declLocalVariable Nothing (CRawType "MPI_Comm") "cm" (Just comm)
   statement "int size, rank"
   statement "MPI_Comm_size(cm, &size)"
   statement "MPI_Comm_rank(cm, &rank)"
+  raw $ printf "if(size != %d) {\nfprintf(stderr,\"Do not match the number of MPI process!\");\nexit(1);\n}" p0
   bases <- view (omGlobalEnvironment . commBases)
   statement $ "int " ++ intercalate "," ["i" ++ show i | i <- [1..dim]]
   call "Formura_Decode_rank" ("rank":["&i"++show i | i <- [1..dim]])
@@ -233,7 +236,7 @@ initBody comm = do
             lengthes <- mapM (\(a,v) -> set ("length_" ++ a) CDouble (show v)) $ zip axes lengthPerNode
             return $ [myRank] <> offsets <> lengthes
           Just mpiShape -> do
-            fs' <- setupMPI comm
+            fs' <- setupMPI mpiShape comm
             offsets <- mapM (\(a,i,l) -> set ("offset_" ++ a) CInt (show l++"*i"++show i)) $ zip3 axes [1..dim] gridPerNode
             lengthes <- mapM (\(a,v) -> set ("length_" ++ a) CDouble (show v)) $ zip axes $ zipWith (\l m -> l * fromIntegral m) lengthPerNode mpiShape
             return $  fs' <> offsets <> lengthes
