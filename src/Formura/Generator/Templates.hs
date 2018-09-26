@@ -109,14 +109,15 @@ defUtilFunctions = do
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   sleeve <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
   let totalGrid = zipWith (*) gridPerNode (fromMaybe (repeat 1) mmpiShape)
-  let toPosBody a l = do
-        statement $ printf "return d%s*((i+n.offset_%s - (%d*n.time_step)%%%d + %d)%%%d)" a a sleeve l l l
-  for_ (zip axes totalGrid) $ \(a,l) ->
-    defGlobalFunction ("to_pos_"++a) [(CInt, "i"), (CRawType "Formura_Navi", "n")] CDouble (\_ -> toPosBody a l)
+  let toPosBody a =
+        statement $ printf "return d%s*((i+n.offset_%s)%%n.total_grid_%s)" a a a
+  for_ axes $ \a ->
+    defGlobalFunction ("to_pos_"++a) [(CInt, "i"), (CRawType "Formura_Navi", "n")] CDouble (\_ -> toPosBody a)
 
 noBlocking :: [(String, CType)] -> CVariable -> BuildM GenM (CType, CType)
 noBlocking gridStruct globalData = do
   s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
+  axes <- view (omGlobalEnvironment . axesNames)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   buffType <- defLocalTypeStruct "Formura_Buff" gridStruct (SoA $ map (+ (2*s)) gridPerNode)
   rsltType <- defLocalTypeStruct "Formura_Rslt" gridStruct (SoA gridPerNode)
@@ -128,6 +129,7 @@ noBlocking gridStruct globalData = do
   copy globalData buff empty (repeat $ 2*s)
   -- 1ステップ更新
   call "Formura_Step" [ref buff, ref rslt]
+  for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a s a a
   -- 結果の書き出し
   copy rslt globalData empty empty
   -- time_step を更新
@@ -137,6 +139,7 @@ noBlocking gridStruct globalData = do
 temporalBlocking :: [(String,CType)] -> CVariable -> [Int] -> [Int] -> Int -> BuildM GenM (CType, CType)
 temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
   s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
+  axes <- view (omGlobalEnvironment . axesNames)
   dim <- view (omGlobalEnvironment . dimension)
   buffType <- defLocalTypeStruct "Formura_Buff" gridStruct (SoA $ map (+ (2*s)) gridPerBlock)
   rsltType <- defLocalTypeStruct "Formura_Rslt" gridStruct (SoA gridPerBlock)
@@ -179,6 +182,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
             return ()
       --   - 1段更新
           call "Formura_Step" [ref buff, ref rslt]
+          for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a s a a
       --   - 壁の書き出し
           for_ tmpWalls $ \(flag, gs, tmpWall) -> do
             let idx0 = (toIdx [i | (i,b) <- zip (fromIdx idx) flag, not b]) >< it
@@ -228,6 +232,7 @@ initBody comm = do
   lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
   dim <- view (omGlobalEnvironment . dimension)
   mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  let totalGrid = zipWith (*) gridPerNode (fromMaybe (repeat 1) mmpiShape)
   let set n t v = statement ("n->" ++ n ++ " = " ++ v) >> return (n, t)
   fs <- case mmpiShape of
           Nothing -> do
@@ -243,7 +248,8 @@ initBody comm = do
   timeStep <- set "time_step" CInt "0"
   lowers <- mapM (\a -> set ("lower_" ++ a) CInt "0") axes
   uppers <- mapM (\(a,v) -> set ("upper_" ++ a) CInt (show v)) $ zip axes gridPerNode
-  let navi = [timeStep] <> lowers <> uppers <> fs
+  totals <- mapM (\(a,v) -> set ("total_grid_" ++ a) CInt (show v)) $ zip axes totalGrid
+  let navi = [timeStep] <> lowers <> uppers <> totals <> fs
   return navi
 
 finalizeBody :: BuildM GenM ()
