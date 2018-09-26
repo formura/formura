@@ -67,7 +67,9 @@ scaffold = do
                       NoBlocking -> (noBlocking gridStruct globalData)
                       TemporalBlocking gpb bpn nt -> temporalBlocking gridStruct globalData gpb bpn nt
   (buffType, rsltType) <- defGlobalFunction "Formura_Forward" [(CRawType "Formura_Navi *", "n")] CVoid (\_ -> forwardBody)
-  defLocalFunction "Formura_Step" [(CPtr buffType, "buff"), (CPtr rsltType, "rslt")] CVoid stepBody
+  dim <- view (omGlobalEnvironment . dimension)
+  let blockOffset = [(CInt, "block_offset_" ++ show i) | i <- [1..dim]]
+  defLocalFunction "Formura_Step" ([(CPtr buffType, "buff"), (CPtr rsltType, "rslt"),(CRawType "Formura_Navi", "n")] ++ blockOffset) CVoid stepBody
 
 defUtilFunctions :: GenM ()
 defUtilFunctions = do
@@ -118,6 +120,7 @@ noBlocking :: [(String, CType)] -> CVariable -> BuildM GenM (CType, CType)
 noBlocking gridStruct globalData = do
   s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
   axes <- view (omGlobalEnvironment . axesNames)
+  dim <- view (omGlobalEnvironment . dimension)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   buffType <- defLocalTypeStruct "Formura_Buff" gridStruct (SoA $ map (+ (2*s)) gridPerNode)
   rsltType <- defLocalTypeStruct "Formura_Rslt" gridStruct (SoA gridPerNode)
@@ -128,7 +131,7 @@ noBlocking gridStruct globalData = do
 
   copy globalData buff empty (repeat $ 2*s)
   -- 1ステップ更新
-  call "Formura_Step" [ref buff, ref rslt]
+  call "Formura_Step" ([ref buff, ref rslt,"*n"] ++ (replicate dim "0"))
   for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a s a a
   -- 結果の書き出し
   copy rslt globalData empty empty
@@ -181,7 +184,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
               tell [mkIdent f buff (idx' <> toIdx [if b then n else 0 | (b,n) <- zip flag gridPerBlock]) @= mkIdent f tmpWall (idx0 >< idx') | f <- (getFields tmpWall), f `elem` (getFields buff)]
             return ()
       --   - 1段更新
-          call "Formura_Step" [ref buff, ref rslt]
+          call "Formura_Step" ([ref buff, ref rslt,"*n"] ++ fromIdx floorOffset)
           for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a s a a
       --   - 壁の書き出し
           for_ tmpWalls $ \(flag, gs, tmpWall) -> do
@@ -277,6 +280,7 @@ stepBody args = do
   let inputSize = getSize $ variableType $ args !! 0
   mmg <- view omStepGraph
   let sizeTable = calcSizes mmg
+  axes <- view (omGlobalEnvironment . axesNames)
   -- 中間変数を生成するかどうかを判定する
   -- 型が void なら最後に Store されているはずなので、中間変数を生成しない
   -- そうでないなら、最後に型に合う変数に結果を書き込む必要がある (最後に命令として Store がない)
@@ -327,7 +331,7 @@ stepBody args = do
             (Triop _ a b c) -> formatNode a ++ "?" ++ formatNode b ++ ":" ++ formatNode c
             -- LoadIndex をサポートするにはグローバルな配列に対するオフセットが必要
             -- つまり、Formura_Step のAPIを変更する必要がある
-            -- LoadIndex i -> "i" ++ (map toLower $ axes !! i)
+            LoadIndex i -> (fromIdx idx) !! i ++ "+n.offset_" ++ (axes !! i) ++ "+block_offset_" ++ show (i+1)
             -- Naryop は廃止かもなので、実装を待つ
             -- Naryop op xs -> undefined
             x -> error $ "Unimplemented for keyword: " ++ show x
