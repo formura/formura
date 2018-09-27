@@ -505,8 +505,8 @@ program nc0 = do
       mkExtentStmt x v = SubstF (Ident x) (Imm v)
 
       spacialIntervals = zipWith (\l n -> let l' = toRational l in (numerator l') % ((denominator l') * fromIntegral n)) (toList $ nc0 ^. ncLengthPerNode) (toList $ nc0 ^. ncGridPerNode)
-      totalLengthes = zipWith (\l n -> fromIntegral n * toRational l) (toList $ nc0 ^. ncLengthPerNode) (maybe (repeat 1) toList $ nc0 ^. ncMPIShape)
+      totalGrids = zipWith (\n m -> fromIntegral (n * m)) (toList $ nc0 ^. ncGridPerNode) (maybe (repeat 1) toList $ nc0 ^. ncMPIShape)
       globalExtentStmts = zipWith mkExtentStmt ["d" ++ a | a <- ivars] spacialIntervals
-                       ++ zipWith mkExtentStmt ["length_" ++ a | a <- ivars] totalLengthes
+                       ++ zipWith mkExtentStmt ["total_grid_" ++ a | a <- ivars] totalGrids
 
   return $ Program decls (BindingF $ globalExtentStmts ++ concat stmts) nc0

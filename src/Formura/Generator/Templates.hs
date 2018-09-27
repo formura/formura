@@ -52,8 +52,6 @@ scaffold = do
   gridStruct <- mkFields <$> view omStateSignature
   gridStructType <- defGlobalTypeStruct typeName gridStruct (SoA gridPerNode)
 
-  let spaceIntervals = ic ^. icSpaceInterval
-  sequence_ [declGlobalVariable CDouble ("d" ++ a) (Just $ show d) | (a,d) <- zip axes spaceIntervals]
   globalData <- declGlobalVariable gridStructType insntaceName Nothing
   
   defUtilFunctions
@@ -111,9 +109,8 @@ defUtilFunctions = do
   axes <- view (omGlobalEnvironment . axesNames)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   sleeve <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
-  let totalGrid = zipWith (*) gridPerNode (fromMaybe (repeat 1) mmpiShape)
   let toPosBody a =
-        statement $ printf "return d%s*((i+n.offset_%s)%%n.total_grid_%s)" a a a
+        statement $ printf "return n.space_interval_%s*((i+n.offset_%s)%%n.total_grid_%s)" a a a
   for_ axes $ \a ->
     defGlobalFunction ("to_pos_"++a) [(CInt, "i"), (CRawType "Formura_Navi", "n")] CDouble (\_ -> toPosBody a)
 
@@ -236,6 +233,7 @@ initBody comm = do
   lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
   dim <- view (omGlobalEnvironment . dimension)
   mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  spaceIntervals <- view (omGlobalEnvironment . envNumericalConfig . icSpaceInterval)
   let totalGrid = zipWith (*) gridPerNode (fromMaybe (repeat 1) mmpiShape)
   let set n t v = statement ("n->" ++ n ++ " = " ++ v) >> return (n, t)
   fs <- case mmpiShape of
@@ -253,8 +251,9 @@ initBody comm = do
   lowers <- mapM (\a -> set ("lower_" ++ a) CInt "0") axes
   uppers <- mapM (\(a,v) -> set ("upper_" ++ a) CInt (show v)) $ zip axes gridPerNode
   totals <- mapM (\(a,v) -> set ("total_grid_" ++ a) CInt (show v)) $ zip axes totalGrid
+  intervals <- mapM (\(a,v) -> set ("space_interval_" ++ a) CDouble (show v)) $ zip axes spaceIntervals
   call "Formura_Setup" ("*n":replicate dim "0")
-  let navi = [timeStep] <> lowers <> uppers <> totals <> fs
+  let navi = [timeStep] <> lowers <> uppers <> totals <> intervals <> fs
   return navi
 
 finalizeBody :: BuildM GenM ()
