@@ -6,7 +6,7 @@ d_yy = fun(q) (q[i,j+1] + q[i,j-1] - 2*q[i,j])/dy**2
 double :: dt = 0.1*dx*dx
 
 extern function :: exp
-gauss = fun(x,y) exp(-((x-(length_x/2))/(5*dx))**2 - ((y-(length_y/2))/(5*dy))**2)
+gauss = fun(x,y) exp(-((x-(total_grid_x*dx/2))/(5*dx))**2 - ((y-(total_grid_y*dy/2))/(5*dy))**2)
 
 begin function q = init()
   double [] :: q = 0
