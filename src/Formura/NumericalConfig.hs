@@ -26,7 +26,7 @@ data NumericalConfig = NumericalConfig
   , _ncGridPerNode :: Vec Int
   , _ncGridPerBlock :: Maybe (Vec Int)
   , _ncTemporalBlockingInterval :: Maybe Int
-  , _ncMPIShape :: Vec Int
+  , _ncMPIShape :: Maybe (Vec Int)
   , _ncWithOmp :: Maybe Int
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
 
@@ -55,8 +55,8 @@ decodeConfig str = check =<< first ConfigException (Y.decodeEither str)
     check :: NumericalConfig -> Either ConfigException NumericalConfig
     check cfg | null (cfg ^. ncLengthPerNode) = Left $ ConfigException "length_per_node should be a nonempty list"
               | null (cfg ^. ncGridPerNode) = Left $ ConfigException "grid_per_node should be a nonempty list"
-              | null (cfg ^. ncMPIShape) = Left $ ConfigException "mpi_shape should be a nonempty list"
               | maybe False null (cfg ^. ncGridPerBlock) = Left $ ConfigException "grid_per_block should be a nonempty list"
+              | maybe False null (cfg ^. ncMPIShape) = Left $ ConfigException "mpi_shape should be a nonempty list"
               | maybe False (< 1) (cfg ^. ncTemporalBlockingInterval) = Left $ ConfigException "temporal_blocking_interval should be a positive integer"
               | maybe False (\i -> i `notElem` [0,1,2]) (cfg ^. ncWithOmp) = Left $ ConfigException "with_omp should be 0, 1 or 2"
               | otherwise = Right cfg
@@ -83,7 +83,7 @@ data InternalConfig = InternalConfig
   , _icSpaceInterval :: [Double]
   , _icBlockingType :: BlockingType
   , _icSleeve :: Int
-  , _icMPIShape :: [Int]
+  , _icMPIShape :: Maybe [Int]
   , _icWithOmp :: Int
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
 
@@ -96,7 +96,7 @@ defaultInternalConfig = InternalConfig
   , _icSpaceInterval = []
   , _icBlockingType = NoBlocking
   , _icSleeve = 1
-  , _icMPIShape = []
+  , _icMPIShape = Nothing
   , _icWithOmp = 0
   }
 
@@ -119,14 +119,14 @@ convertConfig s nc = check ic
           , _icSpaceInterval = toList $ (fmap (toRealFloat @Double) $ nc ^. ncLengthPerNode) / (fmap fromIntegral $ nc ^. ncGridPerNode)
           , _icBlockingType = bt
           , _icSleeve = s
-          , _icMPIShape = toList $ nc ^. ncMPIShape
+          , _icMPIShape = toList <$> nc ^. ncMPIShape
           , _icWithOmp = fromMaybe 0 $ nc ^. ncWithOmp
           }
     -- 値が制約を満たすか確認
     check :: InternalConfig -> Either ConfigException InternalConfig
     check cfg | any (<0) (cfg ^. icLengthPerNode) = Left $ ConfigException "the element of length_per_node should be a positive number"
               | any (<1) (cfg ^. icGridPerNode) = Left $ ConfigException "the element of grid_per_node should be a positive integer"
-              | any (<1) (cfg ^. icMPIShape) = Left $ ConfigException "the element of mpi_shape should be a positive integer"
+              | maybe False (any (<1)) (cfg ^. icMPIShape) = Left $ ConfigException "the element of mpi_shape should be a positive integer"
               | maybe False (any (/=0)) ms = Left $ ConfigException "Inconsistent config"
               | otherwise = Right cfg
 

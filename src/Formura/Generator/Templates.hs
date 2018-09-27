@@ -7,7 +7,7 @@ import Control.Monad.Writer
 import Data.Foldable (toList, for_)
 import Data.List
 import qualified Data.Map as M
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, isJust, fromMaybe)
 import Text.Printf
 
 import Formura.NumericalConfig
@@ -34,15 +34,18 @@ scaffold = do
   insntaceName <- view (omGlobalEnvironment . gridStructInstanceName)
 
   addHeader "<stdio.h>"
+  addHeader "<stdlib.h>"
   addHeader "<stdbool.h>"
   addHeader "<math.h>"
-  addHeader "<mpi.h>"
+  when (isJust $ ic ^. icMPIShape) $ addHeader "<mpi.h>"
   when (ic ^. icWithOmp /= 0) $ addHeader "<omp.h>"
 
   let gridPerNode = ic ^. icGridPerNode
   defineParam "Ns" (show $ ic ^. icSleeve)
   sequence_ [defineParam ("L" ++ show i) (show v) | (i,v) <- zip [1..] gridPerNode]
-  sequence_ [defineParam ("P" ++ show i) (show v) | (i,v) <- zip [1..] (ic ^. icMPIShape)]
+  case (ic ^. icMPIShape) of
+    Nothing -> return ()
+    Just mpiShape -> sequence_ [defineParam ("P" ++ show i) (show v) | (i,v) <- zip [1..] mpiShape]
 
   let mkFields :: M.Map IdentName TypeExpr -> [(String, CType)]
       mkFields = M.foldrWithKey (\k t acc -> (k, mapType t):acc) []
@@ -55,7 +58,11 @@ scaffold = do
   
   defUtilFunctions
 
-  defGlobalFunction "Formura_Init" [(CRawType "Formura_Navi *","n"),(CRawType "MPI_Comm","comm")] CVoid (\_ -> initBody)
+  navi <- defGlobalFunction "Formura_Init" [(CPtr CInt, "argc"),(CRawType "char ***", "argv"),(CRawType "Formura_Navi *","n")] CVoid (\_ -> initBody "MPI_COMM_WORLD")
+  defGlobalTypeStruct "Formura_Navi" navi Normal
+  when (isJust $ ic ^. icMPIShape) $
+    () <$ defGlobalFunction "Formura_Custom_Init" [(CRawType "Formura_Navi *","n"),(CRawType "MPI_Comm", "comm")] CVoid (\_ -> initBody "comm")
+  defGlobalFunction "Formura_Finalize" [] CVoid (\_ -> finalizeBody)
   let forwardBody = case (ic ^. icBlockingType) of
                       NoBlocking -> (noBlocking gridStruct globalData)
                       TemporalBlocking gpb bpn nt -> temporalBlocking gridStruct globalData gpb bpn nt
@@ -64,41 +71,44 @@ scaffold = do
 
 defUtilFunctions :: GenM ()
 defUtilFunctions = do
-  dim <- view (omGlobalEnvironment . dimension)
-  mpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
-  let encodeRankArg = [(CInt, "p" ++ show i) | i <- [1..dim]]
-  let decodeRankArg = (CInt,"p"):[(CPtr CInt, "p" ++ show i) | i <- [1..dim]]
-  defLocalFunction "Formura_Encode_rank" encodeRankArg CInt $ \_ -> case dim of
-    1 -> do
-      let m1:_ = mpiShape
-      statement $ printf "return (p1+%d)%%%d" m1 m1
-    2 -> do
-      let m1:m2:_ = mpiShape
-      statement $ printf "return ((p1+%d)%%%d + %d*((p2+%d)%%%d))" m1 m1 m1 m2 m2
-    3 -> do
-      let m1:m2:m3:_ = mpiShape
-      statement $ printf "return ((p1+%d)%%%d + %d*((p2+%d)%%%d) + %d*((p3+%d)%%%d))" m1 m1 m1 m2 m2 (m1*m2) m3 m3
-    _ -> error "No support"
-  defLocalFunction "Formura_Decode_rank" decodeRankArg CVoid $ \_ -> case dim of
-    1 -> do
-      let m1:_ = mpiShape
-      statement $ printf "*p1 = (int)p%%%d" m1
-    2 -> do
-      let m1:_:_ = mpiShape
-      statement $ printf "*p1 = (int)p%%%d" m1
-      statement $ printf "*p2 = (int)p/%d" m1
-    3 -> do
-      let m1:m2:_:_ = mpiShape
-      statement $ printf "int p4 = (int)p%%%d" (m1*m2)
-      statement $ printf "*p1 = (int)p4%%%d" m1
-      statement $ printf "*p2 = (int)p4/%d" m1
-      statement $ printf "*p3 = (int)p/%d" (m1*m2)
-    _ -> error "No support"
+  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  case mmpiShape of
+    Nothing -> return ()
+    Just mpiShape -> do
+      dim <- view (omGlobalEnvironment . dimension)
+      let encodeRankArg = [(CInt, "p" ++ show i) | i <- [1..dim]]
+      let decodeRankArg = (CInt,"p"):[(CPtr CInt, "p" ++ show i) | i <- [1..dim]]
+      defLocalFunction "Formura_Encode_rank" encodeRankArg CInt $ \_ -> case dim of
+        1 -> do
+          let m1:_ = mpiShape
+          statement $ printf "return (p1+%d)%%%d" m1 m1
+        2 -> do
+          let m1:m2:_ = mpiShape
+          statement $ printf "return ((p1+%d)%%%d + %d*((p2+%d)%%%d))" m1 m1 m1 m2 m2
+        3 -> do
+          let m1:m2:m3:_ = mpiShape
+          statement $ printf "return ((p1+%d)%%%d + %d*((p2+%d)%%%d) + %d*((p3+%d)%%%d))" m1 m1 m1 m2 m2 (m1*m2) m3 m3
+        _ -> error "No support"
+      defLocalFunction "Formura_Decode_rank" decodeRankArg CVoid $ \_ -> case dim of
+        1 -> do
+          let m1:_ = mpiShape
+          statement $ printf "*p1 = (int)p%%%d" m1
+        2 -> do
+          let m1:_:_ = mpiShape
+          statement $ printf "*p1 = (int)p%%%d" m1
+          statement $ printf "*p2 = (int)p/%d" m1
+        3 -> do
+          let m1:m2:_:_ = mpiShape
+          statement $ printf "int p4 = (int)p%%%d" (m1*m2)
+          statement $ printf "*p1 = (int)p4%%%d" m1
+          statement $ printf "*p2 = (int)p4/%d" m1
+          statement $ printf "*p3 = (int)p/%d" (m1*m2)
+        _ -> error "No support"
 
   axes <- view (omGlobalEnvironment . axesNames)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
   sleeve <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
-  let totalGrid = zipWith (*) gridPerNode mpiShape
+  let totalGrid = zipWith (*) gridPerNode (fromMaybe (repeat 1) mmpiShape)
   let toPosBody a l = do
         statement $ printf "return d%s*((i+n.offset_%s - (%d*n.time_step)%%%d + %d)%%%d)" a a sleeve l l l
   for_ (zip axes totalGrid) $ \(a,l) ->
@@ -185,16 +195,16 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
   statement $ "n->time_step += " ++ show nt
   return (buffType, rsltType)
 
-initBody :: BuildM GenM ()
-initBody = do
-  statement "int size, rank"
-  statement "MPI_Comm_size(comm, &size)"
-  statement "MPI_Comm_rank(comm, &rank)"
-  axes <- view (omGlobalEnvironment . axesNames)
-  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
-  lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
-  mpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+setupMPI :: [Int] -> String -> BuildM GenM [(String, CType)]
+setupMPI mpiShape comm = do
+  let p0 = product mpiShape
   dim <- view (omGlobalEnvironment . dimension)
+  when (comm == "MPI_COMM_WORLD") $ call "MPI_Init" ["argc", "argv"]
+  declLocalVariable Nothing (CRawType "MPI_Comm") "cm" (Just comm)
+  statement "int size, rank"
+  statement "MPI_Comm_size(cm, &size)"
+  statement "MPI_Comm_rank(cm, &rank)"
+  raw $ printf "if(size != %d) {\nfprintf(stderr,\"Do not match the number of MPI process!\");\nexit(1);\n}" p0
   bases <- view (omGlobalEnvironment . commBases)
   statement $ "int " ++ intercalate "," ["i" ++ show i | i <- [1..dim]]
   call "Formura_Decode_rank" ("rank":["&i"++show i | i <- [1..dim]])
@@ -207,17 +217,41 @@ initBody = do
       ranksTable = [(formatRank r,rank2arg r) | r <- rs ]
   let set n t v = statement ("n->" ++ n ++ " = " ++ v) >> return (n, t)
   myRank <- set "my_rank" CInt "rank"
+  mpiWorld <- set "mpi_world" (CRawType "MPI_Comm") "cm"
+  ranks <- mapM (\(r,ag) -> set ("rank_" ++ r) CInt ("Formura_Encode_rank" ++ ag)) ranksTable
+  return $ [myRank,mpiWorld] <> ranks
+
+initBody :: String -> BuildM GenM [(String,CType)]
+initBody comm = do
+  axes <- view (omGlobalEnvironment . axesNames)
+  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
+  lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
+  dim <- view (omGlobalEnvironment . dimension)
+  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  let set n t v = statement ("n->" ++ n ++ " = " ++ v) >> return (n, t)
+  fs <- case mmpiShape of
+          Nothing -> do
+            myRank <- set "my_rank" CInt "0"
+            offsets <- mapM (\(a,l) -> set ("offset_" ++ a) CInt (show l)) $ zip axes gridPerNode
+            lengthes <- mapM (\(a,v) -> set ("length_" ++ a) CDouble (show v)) $ zip axes lengthPerNode
+            return $ [myRank] <> offsets <> lengthes
+          Just mpiShape -> do
+            fs' <- setupMPI mpiShape comm
+            offsets <- mapM (\(a,i,l) -> set ("offset_" ++ a) CInt (show l++"*i"++show i)) $ zip3 axes [1..dim] gridPerNode
+            lengthes <- mapM (\(a,v) -> set ("length_" ++ a) CDouble (show v)) $ zip axes $ zipWith (\l m -> l * fromIntegral m) lengthPerNode mpiShape
+            return $  fs' <> offsets <> lengthes
   timeStep <- set "time_step" CInt "0"
-  mpiWorld <- set "mpi_world" (CRawType "MPI_Comm") "comm"
   lowers <- mapM (\a -> set ("lower_" ++ a) CInt "0") axes
   uppers <- mapM (\(a,v) -> set ("upper_" ++ a) CInt (show v)) $ zip axes gridPerNode
-  offsets <- mapM (\(a,i,l) -> set ("offset_" ++ a) CInt (show l++"*i"++show i)) $ zip3 axes [1..dim] gridPerNode
-  lengthes <- mapM (\(a,v) -> set ("length_" ++ a) CDouble (show v)) $ zip axes $ zipWith (\l m -> l * fromIntegral m) lengthPerNode mpiShape
-  ranks <- mapM (\(r,ag) -> set ("rank_" ++ r) CInt ("Formura_Encode_rank" ++ ag)) ranksTable
-  let navi = [myRank, timeStep, mpiWorld] <> lowers <> uppers <> offsets <> lengthes <> ranks
-  defGlobalTypeStruct "Formura_Navi" navi Normal
-  return ()
+  let navi = [timeStep] <> lowers <> uppers <> fs
+  return navi
 
+finalizeBody :: BuildM GenM ()
+finalizeBody = do
+  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  case mmpiShape of
+    Nothing -> return ()
+    Just _ -> call "MPI_Finalize" []
 
 -- Manifestノードの配列サイズを計算する
 -- もとの配列サイズ NX+2Ns に比べてどれだけ小さいかを求める
