@@ -72,9 +72,8 @@ scaffold = do
   mfirstStepGraph <- view omFirstStepGraph
   case mfirstStepGraph of
     Nothing -> return ()
-    Just firstStepGraph -> do
-      (buffType0, rsltType0) <- defLocalFunction "Formura_First_Step" [(CRawType "Formura_Navi *", "n")] CVoid (\_ -> firstStepBody gridStruct globalData)
-      defLocalFunction "Formura_First_Step_Kernel" ([(CPtr buffType0, "buff"), (CPtr rsltType0, "rslt"),(CRawType "Formura_Navi", "n")] ++ blockOffset) CVoid (firstStepKernelBody firstStepGraph)
+    Just firstStepGraph ->
+      defLocalFunction "Formura_First_Step" [(CRawType "Formura_Navi *", "n")] CVoid (\_ -> firstStepBody firstStepGraph gridStruct globalData)
 
 defUtilFunctions :: GenM ()
 defUtilFunctions = do
@@ -269,8 +268,8 @@ initBody comm = do
 -- FIX ME
 -- noBlocking との統合
 -- メモリの節約
-firstStepBody :: [(String, CType)] -> CVariable -> BuildM GenM (CType, CType)
-firstStepBody gridStruct globalData = do
+firstStepBody :: MMGraph -> [(String, CType)] -> CVariable -> BuildM GenM ()
+firstStepBody firstStepGraph gridStruct globalData = do
   s <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icSleeve0)
   axes <- view (omGlobalEnvironment . axesNames)
   dim <- view (omGlobalEnvironment . dimension)
@@ -279,16 +278,18 @@ firstStepBody gridStruct globalData = do
   rsltType <- defLocalTypeStruct "Formura_Rslt0" gridStruct (SoA gridPerNode)
   buff <- declLocalVariable (Just "static") buffType "buff0" Nothing
   rslt <- declLocalVariable (Just "static") rsltType "rslt0" Nothing
+  lift $ defLocalFunction "Formura_First_Step_Kernel" ([(CPtr buffType, "buff"), (CPtr rsltType, "rslt"),(CRawType "Formura_Navi", "n")]) CVoid (firstStepKernelBody firstStepGraph)
   -- 通信
   sendrecv "0" gridStruct globalData buff s
 
   copy globalData buff empty (repeat $ 2*s)
   -- 1ステップ更新
-  call "Formura_First_Step_Kernel" ([ref buff, ref rslt,"*n"] ++ (replicate dim "0"))
+  call "Formura_First_Step_Kernel" [ref buff, ref rslt,"*n"]
   for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a s a a
   -- 結果の書き出し
   copy rslt globalData empty empty
-  return (buffType, rsltType)
+  -- return (buffType, rsltType)
+  return ()
 
 finalizeBody :: BuildM GenM ()
 finalizeBody = do
