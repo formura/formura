@@ -83,6 +83,7 @@ data InternalConfig = InternalConfig
   , _icSpaceInterval :: [Double]
   , _icBlockingType :: BlockingType
   , _icSleeve :: Int
+  , _icSleeve0 :: Maybe Int
   , _icMPIShape :: Maybe [Int]
   , _icWithOmp :: Int
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
@@ -96,12 +97,13 @@ defaultInternalConfig = InternalConfig
   , _icSpaceInterval = []
   , _icBlockingType = NoBlocking
   , _icSleeve = 1
+  , _icSleeve0 = Nothing
   , _icMPIShape = Nothing
   , _icWithOmp = 0
   }
 
-convertConfig :: Int -> NumericalConfig -> Either ConfigException InternalConfig
-convertConfig s nc = check ic
+convertConfig :: Int -> Maybe Int -> NumericalConfig -> Either ConfigException InternalConfig
+convertConfig s s0 nc = check ic
   where
     nt = fromMaybe 1 (nc ^. ncTemporalBlockingInterval)
     totalGrids = (nc ^. ncGridPerNode) + pure (2*s*nt)
@@ -119,6 +121,7 @@ convertConfig s nc = check ic
           , _icSpaceInterval = toList $ (fmap (toRealFloat @Double) $ nc ^. ncLengthPerNode) / (fmap fromIntegral $ nc ^. ncGridPerNode)
           , _icBlockingType = bt
           , _icSleeve = s
+          , _icSleeve0 = s0
           , _icMPIShape = toList <$> nc ^. ncMPIShape
           , _icWithOmp = fromMaybe 0 $ nc ^. ncWithOmp
           }

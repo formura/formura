@@ -69,6 +69,12 @@ scaffold = do
   let blockOffset = [(CInt, "block_offset_" ++ show i) | i <- [1..dim]]
   defLocalFunction "Formura_Setup" ([(CRawType "Formura_Navi", "n")] ++ blockOffset) CVoid (setupBody globalData)
   defLocalFunction "Formura_Step" ([(CPtr buffType, "buff"), (CPtr rsltType, "rslt"),(CRawType "Formura_Navi", "n")] ++ blockOffset) CVoid stepBody
+  mfirstStepGraph <- view omFirstStepGraph
+  case mfirstStepGraph of
+    Nothing -> return ()
+    Just firstStepGraph -> do
+      (buffType0, rsltType0) <- defLocalFunction "Formura_First_Step" [(CRawType "Formura_Navi *", "n")] CVoid (\_ -> firstStepBody gridStruct globalData)
+      defLocalFunction "Formura_First_Step_Kernel" ([(CPtr buffType0, "buff"), (CPtr rsltType0, "rslt"),(CRawType "Formura_Navi", "n")] ++ blockOffset) CVoid (firstStepKernelBody firstStepGraph)
 
 defUtilFunctions :: GenM ()
 defUtilFunctions = do
@@ -253,8 +259,36 @@ initBody comm = do
   totals <- mapM (\(a,v) -> set ("total_grid_" ++ a) CInt (show v)) $ zip axes totalGrid
   intervals <- mapM (\(a,v) -> set ("space_interval_" ++ a) CDouble (show v)) $ zip axes spaceIntervals
   call "Formura_Setup" ("*n":replicate dim "0")
+  mfirstStepGraph <- view omFirstStepGraph
+  case mfirstStepGraph of
+    Nothing -> return ()
+    Just _ -> call "Formura_First_Step" ["n"]
   let navi = [timeStep] <> lowers <> uppers <> totals <> intervals <> fs
   return navi
+
+-- FIX ME
+-- noBlocking との統合
+-- メモリの節約
+firstStepBody :: [(String, CType)] -> CVariable -> BuildM GenM (CType, CType)
+firstStepBody gridStruct globalData = do
+  s <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icSleeve0)
+  axes <- view (omGlobalEnvironment . axesNames)
+  dim <- view (omGlobalEnvironment . dimension)
+  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
+  buffType <- defLocalTypeStruct "Formura_Buff0" gridStruct (SoA $ map (+ (2*s)) gridPerNode)
+  rsltType <- defLocalTypeStruct "Formura_Rslt0" gridStruct (SoA gridPerNode)
+  buff <- declLocalVariable (Just "static") buffType "buff0" Nothing
+  rslt <- declLocalVariable (Just "static") rsltType "rslt0" Nothing
+  -- 通信
+  sendrecv gridStruct globalData buff s
+
+  copy globalData buff empty (repeat $ 2*s)
+  -- 1ステップ更新
+  call "Formura_First_Step_Kernel" ([ref buff, ref rslt,"*n"] ++ (replicate dim "0"))
+  for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a s a a
+  -- 結果の書き出し
+  copy rslt globalData empty empty
+  return (buffType, rsltType)
 
 finalizeBody :: BuildM GenM ()
 finalizeBody = do
@@ -267,6 +301,9 @@ setupBody :: CVariable -> [CVariable] -> BuildM GenM ()
 setupBody globalData _ = do
   mmg <- view omInitGraph
   mkKernel mmg [globalData,globalData]
+
+firstStepKernelBody :: MMGraph -> [CVariable] -> BuildM GenM ()
+firstStepKernelBody mmg args = mkKernel mmg args
 
 stepBody :: [CVariable] -> BuildM GenM ()
 stepBody args = do
