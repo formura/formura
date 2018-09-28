@@ -6,8 +6,12 @@ d_yy = fun(q) (q[i,j+1,k] + q[i,j-1,k] - 2*q[i,j,k])/dy**2
 d_zz = fun(q) (q[i,j,k+1] + q[i,j,k-1] - 2*q[i,j,k])/dz**2
 double :: dt = 0.1*dx*dx
 
+extern function :: exp
+gauss = fun(x,y,z) exp(-((x-(total_grid_x*dx/2))/(5*dx))**2 - ((y-(total_grid_y*dy/2))/(5*dy))**2 - ((z-(total_grid_z*dz/2))/(5*dz))**2)
+
 begin function q = init()
   double [] :: q = 0
+  q[i,j,k] = gauss(i*dx,j*dy,k*dz)
 end function
 
 begin function q_next = step(q)

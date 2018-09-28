@@ -4,8 +4,13 @@ axes :: x
 d_xx = fun(q) (q[i+1] + q[i-1] - 2*q[i])/dx**2
 double :: dt = 0.1*dx*dx
 
+extern function :: exp
+
+gauss = fun(x) exp(-((x-(total_grid_x*dx/2))/(5*dx))**2)
+
 begin function q = init()
-  double [] :: q = 0
+  double [] :: q
+  q[i] = gauss(i*dx)
 end function
 
 begin function q_next = step(q)

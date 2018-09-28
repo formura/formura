@@ -1,4 +1,15 @@
 # Changelog for formura
+## HEAD
+
+- Run also without MPI
+- Implement LoadIndex
+- Fix `to_pos` functions
+- `Formura_Init` function initializes MPI and global data
+- Add `Formura_Finalize` function
+- Add `Formura_Custom_Init` function
+- Add `space_interval_x` field to `Formura_Navi` struct
+- Add `total_grid_x` field to `Formura_Navi` struct
+
 ## version 2.2
 
 - Support OpenMP
