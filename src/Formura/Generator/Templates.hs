@@ -131,7 +131,7 @@ noBlocking gridStruct globalData = do
   buff <- declLocalVariable (Just "static") buffType "buff" Nothing
   rslt <- declLocalVariable (Just "static") rsltType "rslt" Nothing
   -- 通信
-  sendrecv gridStruct globalData buff s
+  sendrecv "" gridStruct globalData buff s
 
   copy globalData buff empty (repeat $ 2*s)
   -- 1ステップ更新
@@ -168,7 +168,7 @@ temporalBlocking gridStruct globalData gridPerBlock blockPerNode nt = do
     tmpWall <- declLocalVariable (Just "static") tmpWallType ("tmp_wall_" ++ show i) Nothing
     return (flag, gs, tmpWall)
   -- 通信
-  rs <- isendrecv gridStruct globalData (s*nt)
+  rs <- isendrecv "" gridStruct globalData (s*nt)
   -- 即時計算可能なブロックと通信待ちブロックの分離
   let b0 = [(0,m-1-d) | (n,m) <- zip gridPerBlock blockPerNode, let d = 2*s*nt `div` n]
       bs = [[(if i == j then m-1-d else 0, if i > j then m-1-d else m) | (n,m,i) <- zip3 gridPerBlock blockPerNode [1..dim], let d = 2*s*nt `div` n] | j <- [1..dim]]
@@ -280,7 +280,7 @@ firstStepBody gridStruct globalData = do
   buff <- declLocalVariable (Just "static") buffType "buff0" Nothing
   rslt <- declLocalVariable (Just "static") rsltType "rslt0" Nothing
   -- 通信
-  sendrecv gridStruct globalData buff s
+  sendrecv "0" gridStruct globalData buff s
 
   copy globalData buff empty (repeat $ 2*s)
   -- 1ステップ更新

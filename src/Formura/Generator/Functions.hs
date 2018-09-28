@@ -182,22 +182,22 @@ formatRank b = intercalate "_" [f i | i <- b]
             | x == -1 = "m1"
             | otherwise = error "Error in Formura.Generator.Functions.formatRank"
 
-sendrecv :: IsGen m => [(String,CType)] -> CVariable -> CVariable -> Int -> BuildM m ()
-sendrecv gridStruct src tgt s = do
-  rs <- isendrecv gridStruct src s
+sendrecv :: IsGen m => String -> [(String,CType)] -> CVariable -> CVariable -> Int -> BuildM m ()
+sendrecv ident gridStruct src tgt s = do
+  rs <- isendrecv ident gridStruct src s
   waitAndCopy rs tgt s
 
-isendrecv :: IsGen m => [(String,CType)] -> CVariable -> Int -> BuildM m ([CVariable],[CVariable],[CVariable])
-isendrecv gridStruct src s = do
+isendrecv :: IsGen m => String -> [(String,CType)] -> CVariable -> Int -> BuildM m ([CVariable],[CVariable],[CVariable])
+isendrecv ident gridStruct src s = do
   mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
   bases <- view (omGlobalEnvironment . commBases)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
-  commType <- defLocalTypeStruct "Formura_Comm_Buf" gridStruct Normal
+  commType <- defLocalTypeStruct ("Formura_Comm_Buf" ++ ident) gridStruct Normal
   fmap unzip3 $ for bases $ \b -> do
     let r = formatRank b
     let r' = formatRank $ map negate b
-    sendbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("send_buf_" ++ r) Nothing
-    recvbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("recv_buf_" ++ r') Nothing
+    sendbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("send_buf" ++ ident ++ "_" ++ r) Nothing
+    recvbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("recv_buf" ++ ident ++ "_" ++ r') Nothing
     copy src sendbuf [if d == 1 then n-2*s else 0 | (d,n) <- zip b gridPerNode] empty
     (sendReq, recvReq) <- case mmpiShape of
                             Nothing -> copy sendbuf recvbuf empty empty >> return (sendbuf,recvbuf) -- この返り値はよくないが妥協した
