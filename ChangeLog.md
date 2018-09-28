@@ -9,6 +9,7 @@
 - Add `Formura_Custom_Init` function
 - Add `space_interval_x` field to `Formura_Navi` struct
 - Add `total_grid_x` field to `Formura_Navi` struct
+- Support `first_step`
 
 ## version 2.2
 
