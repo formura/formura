@@ -239,7 +239,7 @@ initBody comm = do
   fs <- case mmpiShape of
           Nothing -> do
             myRank <- set "my_rank" CInt "0"
-            offsets <- mapM (\(a,l) -> set ("offset_" ++ a) CInt (show l)) $ zip axes gridPerNode
+            offsets <- mapM (\a -> set ("offset_" ++ a) CInt "0") axes
             lengthes <- mapM (\(a,v) -> set ("length_" ++ a) CDouble (show v)) $ zip axes lengthPerNode
             return $ [myRank] <> offsets <> lengthes
           Just mpiShape -> do
