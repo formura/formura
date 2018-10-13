@@ -138,7 +138,7 @@ convertConfig s s0 sf nc = check ic
     check cfg | any (<0) (cfg ^. icLengthPerNode) = Left $ ConfigException "the element of length_per_node should be a positive number"
               | any (<1) (cfg ^. icGridPerNode) = Left $ ConfigException "the element of grid_per_node should be a positive integer"
               | maybe False (any (<1)) (cfg ^. icMPIShape) = Left $ ConfigException "the element of mpi_shape should be a positive integer"
-              | maybe False (\ft -> ft `mod` nt == 0) (cfg ^. icFilterInterval) = Left $ ConfigException "the filter interval is a multiple of temporal blocking interval"
+              | maybe False (\ft -> ft `mod` nt /= 0) (cfg ^. icFilterInterval) = Left $ ConfigException "the filter interval is a multiple of temporal blocking interval"
               | maybe False (any (/=0)) ms = Left $ ConfigException "Inconsistent config"
               | otherwise = Right cfg
 
