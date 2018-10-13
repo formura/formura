@@ -239,6 +239,7 @@ data MachineProgram instType typeType = MachineProgram
   { _omGlobalEnvironment :: GlobalEnvironment
   , _omInitGraph :: Graph instType typeType
   , _omFirstStepGraph :: Maybe (Graph instType typeType)
+  , _omFilterGraph :: Maybe (Graph instType typeType)
   , _omStepGraph :: Graph instType typeType
   , _omStateSignature :: M.Map IdentName TypeExpr
   }

@@ -86,6 +86,7 @@ data InternalConfig = InternalConfig
   , _icBlockingType :: BlockingType
   , _icSleeve :: Int
   , _icSleeve0 :: Maybe Int
+  , _icFilterSleeve :: Maybe Int
   , _icFilterInterval :: Maybe Int
   , _icMPIShape :: Maybe [Int]
   , _icWithOmp :: Int
@@ -101,13 +102,14 @@ defaultInternalConfig = InternalConfig
   , _icBlockingType = NoBlocking
   , _icSleeve = 1
   , _icSleeve0 = Nothing
+  , _icFilterSleeve = Nothing
   , _icFilterInterval = Nothing
   , _icMPIShape = Nothing
   , _icWithOmp = 0
   }
 
-convertConfig :: Int -> Maybe Int -> NumericalConfig -> Either ConfigException InternalConfig
-convertConfig s s0 nc = check ic
+convertConfig :: Int -> Maybe Int -> Maybe Int -> NumericalConfig -> Either ConfigException InternalConfig
+convertConfig s s0 sf nc = check ic
   where
     nt = fromMaybe 1 (nc ^. ncTemporalBlockingInterval)
     totalGrids = (nc ^. ncGridPerNode) + pure (2*s*nt)
@@ -126,6 +128,7 @@ convertConfig s s0 nc = check ic
           , _icBlockingType = bt
           , _icSleeve = s
           , _icSleeve0 = s0
+          , _icFilterSleeve = sf
           , _icFilterInterval = nc ^. ncFilterInterval
           , _icMPIShape = toList <$> nc ^. ncMPIShape
           , _icWithOmp = fromMaybe 0 $ nc ^. ncWithOmp

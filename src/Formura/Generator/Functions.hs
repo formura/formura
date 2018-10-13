@@ -37,6 +37,13 @@ withFirstStep f = do
     Nothing -> return ()
     Just g -> f g
 
+withFilter :: (MMGraph -> BuildM ()) -> BuildM ()
+withFilter f = do
+  mfilterGraph <- view omFilterGraph
+  case mfilterGraph of
+    Nothing -> return ()
+    Just g -> f g
+
 getBlockOffsets :: BuildM [(CType,String)]
 getBlockOffsets = do
   dim <- view (omGlobalEnvironment . dimension)
@@ -46,11 +53,12 @@ getSleeves :: BuildM [Int]
 getSleeves = do
   step <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
   first <- maybeToList <$> view (omGlobalEnvironment . envNumericalConfig . icSleeve0)
+  filter' <- maybeToList <$> view (omGlobalEnvironment . envNumericalConfig . icFilterSleeve)
   bt <- view (omGlobalEnvironment . envNumericalConfig . icBlockingType)
   let s = case bt of
            NoBlocking -> [step]
            TemporalBlocking _ _ nt -> [step*nt]
-  return $ nub $ sort $ s ++ first
+  return $ nub $ sort $ s ++ first ++ filter'
 
 getSendBuf :: Int -> [Int] -> BuildM CVariable
 getSendBuf s b =

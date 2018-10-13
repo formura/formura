@@ -660,6 +660,18 @@ genOMProgram fprog = do
             "must match the return type of init : " ++ show initType
         return True
 
+  (existFilter , stFilter, _) <- run $ do
+    setupGlobalEnvironment fprog
+    mfilterFunDef <- lookupToplevelIdents' fprog "filter"
+    case mfilterFunDef of
+      Nothing -> return False
+      Just filterFunDef -> do
+        filterType <- genGlobalFunction gbinds initType lhsOfStep filterFunDef
+        when (initType /= filterType) $
+          raiseErr $ failed $ "the return type of filter : " ++ show filterType ++ "\n" ++
+            "must match the return type of init : " ++ show initType
+        return True
+
   (stateSignature0, stStep, _) <- run $ do
     stepFunDef <- lookupToplevelIdents fprog "step"
     setupGlobalEnvironment fprog
@@ -673,13 +685,15 @@ genOMProgram fprog = do
 
   let sleeve = calcSleeve (stStep ^. theGraph)
       sleeve0 = if existFirstStep then Just (calcSleeve $ stFirst ^. theGraph) else Nothing
-  case convertConfig sleeve sleeve0 (fprog ^. programNumericalConfig) of
+      sleeveFilter = if existFilter then Just (calcSleeve $ stFilter ^. theGraph) else Nothing
+  case convertConfig sleeve sleeve0 sleeveFilter (fprog ^. programNumericalConfig) of
     Left err -> die $ "Error: " ++ displayException err
     Right cfg -> do
       return MachineProgram
         { _omGlobalEnvironment = (stInit ^. globalEnvironment) & envNumericalConfig .~ cfg
         , _omInitGraph = stInit ^. theGraph
         , _omFirstStepGraph = if existFirstStep then Just (stFirst ^. theGraph) else Nothing
+        , _omFilterGraph = if existFilter then Just (stFilter ^. theGraph) else Nothing
         , _omStepGraph = stStep ^. theGraph
         , _omStateSignature = stateSignature0
         }
