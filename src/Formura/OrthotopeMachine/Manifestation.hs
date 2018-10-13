@@ -209,12 +209,14 @@ manifestG omg = do
 manifestation :: WithCommandLineOption => OMProgram -> TranM MMProgram
 manifestation omprog = do
   ig2 <- manifestG $ omprog ^. omInitGraph
+  fsg2 <- sequence $ manifestG <$> omprog ^. omFirstStepGraph
   sg2 <- manifestG $ omprog ^. omStepGraph
 
   return $ MachineProgram
     { _omGlobalEnvironment = omprog ^. omGlobalEnvironment
     , _omStateSignature    = omprog ^. omStateSignature
     , _omInitGraph         = ig2
+    , _omFirstStepGraph    = fsg2
     , _omStepGraph         = sg2
     }
 

@@ -8,8 +8,8 @@ import Text.Printf
 
 import Formura.Generator.Types
 
-render :: CodeStructure -> (String, String)
-render cs = (hContent, cContent)
+render :: String -> CodeStructure -> (String, String)
+render hFileName cs = (hContent, cContent)
   where
     encodesWith f getter = map f (cs ^. getter)
     hContent = unlines $ ["#pragma once"]
@@ -19,8 +19,9 @@ render cs = (hContent, cContent)
                       ++ encodesWith encodeH globalVariables
                       ++ encodesWith encodeH globalFunctions
 
-    cContent = unlines $ ["#include" <+> show (cs ^. hFileName)]
+    cContent = unlines $ ["#include" <+> show hFileName]
                       ++ encodesWith encode localTypes
+                      ++ encodesWith encode localVariables
                       ++ encodesWith encode globalVariables
                       ++ encodesWith encode localFunctions
                       ++ encodesWith encode globalFunctions

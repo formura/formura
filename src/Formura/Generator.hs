@@ -21,8 +21,8 @@ genCode mm = do
   let ic = mm ^. omGlobalEnvironment . envNumericalConfig
   let totalMPI = product <$> ic ^. icMPIShape
 
-  let cs = generate mm hxxFilePath cxxFilePath scaffold
-      (hContent, cContent) = render cs
+  let cs = genCodeStructure mm scaffold
+      (hContent, cContent) = render hxxFilePath cs
 
   let runningScriptPath = "run"
   genRunningScript runningScriptPath totalMPI

@@ -5,10 +5,11 @@
 module Formura.Generator.Functions where
 
 import Control.Lens
-import Control.Monad.Trans
-import Control.Monad.Writer
-import Data.Maybe (isJust)
-import Data.List (intercalate)
+import Control.Monad
+import qualified Data.HashMap.Lazy as HM
+import Data.Maybe (maybeToList)
+import Data.Monoid
+import Data.List (intercalate, sort, nub)
 import Data.Traversable (for)
 import Text.Printf (printf)
 
@@ -17,21 +18,87 @@ import Formura.GlobalEnvironment
 import Formura.OrthotopeMachine.Graph
 import Formura.Generator.Types
 
-addHeader :: IsGen m => String -> m ()
-addHeader h = headers %= (++ ["#include " ++ h])
+withMPI :: ([Int] -> BuildM ()) -> BuildM ()
+withMPI f = do
+  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  case mmpiShape of
+    Nothing -> return ()
+    Just mpiShape -> f mpiShape
 
-defineParam :: IsGen m => String -> String -> m ()
-defineParam n v = definedParams %= (++ ["#define " ++ n ++ " " ++ v])
+withOMP :: BuildM () -> BuildM ()
+withOMP f = do
+  omp <- view (omGlobalEnvironment . envNumericalConfig . icWithOmp)
+  when (omp > 0) $ f
 
-defType :: IsGen m => (Lens' CodeStructure [CTypedef]) -> String -> CType -> m CType
+withFirstStep :: (MMGraph -> BuildM ()) -> BuildM ()
+withFirstStep f = do
+  mfirstStepGraph <- view omFirstStepGraph
+  case mfirstStepGraph of
+    Nothing -> return ()
+    Just g -> f g
+
+getBlockOffsets :: BuildM [(CType,String)]
+getBlockOffsets = do
+  dim <- view (omGlobalEnvironment . dimension)
+  return [(CInt, "block_offset_" ++ show i) | i <- [1..dim]]
+
+getSleeves :: BuildM [Int]
+getSleeves = do
+  step <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
+  first <- maybeToList <$> view (omGlobalEnvironment . envNumericalConfig . icSleeve0)
+  bt <- view (omGlobalEnvironment . envNumericalConfig . icBlockingType)
+  let s = case bt of
+           NoBlocking -> [step]
+           TemporalBlocking _ _ nt -> [step*nt]
+  return $ nub $ sort $ s ++ first
+
+getSendBuf :: Int -> [Int] -> BuildM CVariable
+getSendBuf s b =
+  getVariable ("send_buf" ++ show s ++ "_" ++ formatRank b)
+
+getRecvBuf :: Int -> [Int] -> BuildM CVariable
+getRecvBuf s b =
+  getVariable ("recv_buf" ++ show s ++ "_" ++ formatRank (map negate b))
+
+scope :: BuildM a -> BuildM (a, [CStatement])
+scope f = do
+  st <- use stack
+  stack .= []
+  x <- f
+  res <- use stack
+  stack .= st
+  return (x, res)
+
+addVariable :: String -> CVariable -> BuildM ()
+addVariable k v = variables %= HM.insert k v
+
+getVariable :: String -> BuildM CVariable
+getVariable k = do
+  vs <- use variables
+  case vs ^? ix k of
+    Nothing -> error $ "Error: getVariable " ++ k
+    Just v -> return v
+
+getGlobalData :: BuildM CVariable
+getGlobalData = do
+  insntaceName <- view (omGlobalEnvironment . gridStructInstanceName)
+  getVariable insntaceName
+
+addHeader :: String -> BuildM ()
+addHeader h = scribe headers ["#include " ++ h]
+
+defineParam :: String -> String -> BuildM ()
+defineParam n v = scribe definedParams ["#define " ++ n ++ " " ++ v]
+
+defType :: (Lens' CodeStructure [CTypedef]) -> String -> CType -> BuildM CType
 defType setter als org = do
-  setter %= (++ [CTypedef org als])
+  scribe setter [CTypedef org als]
   return (CRawType als)
 
-defGlobalType :: IsGen m => String -> CType -> m CType
+defGlobalType :: String -> CType -> BuildM CType
 defGlobalType = defType globalTypes
 
-defLocalType :: IsGen m => String -> CType -> m CType
+defLocalType :: String -> CType -> BuildM CType
 defLocalType = defType localTypes
 
 redeftype :: Kind -> [(String,CType)] -> [(String,CType)]
@@ -43,59 +110,66 @@ redeftype (SoA s) fs = [(n, wrap s t) | (n, t) <- fs]
   where wrap s0 (CArray _ t) = CArray s0 t
         wrap s0 t = CArray s0 t
 
-defTypeStruct :: IsGen m => (Lens' CodeStructure [CTypedef]) -> String -> [(String, CType)] -> Kind -> m CType
+defTypeStruct :: (Lens' CodeStructure [CTypedef]) -> String -> [(String, CType)] -> Kind -> BuildM CType
 defTypeStruct setter n fs k = do
   let fs' = redeftype k fs
   let t = case k of
             Normal -> CStruct n fs'
             AoS s -> CArray s (CStruct n fs')
             SoA _ -> CStruct n fs'
-  setter %= (++ [CTypedefStruct fs' n])
+  scribe setter [CTypedefStruct fs' n]
   return t
 
-defGlobalTypeStruct :: IsGen m => String -> [(String, CType)] -> Kind -> m CType
+defGlobalTypeStruct :: String -> [(String, CType)] -> Kind -> BuildM CType
 defGlobalTypeStruct = defTypeStruct globalTypes
 
-defLocalTypeStruct :: IsGen m => String -> [(String, CType)] -> Kind -> m CType
+defLocalTypeStruct :: String -> [(String, CType)] -> Kind -> BuildM CType
 defLocalTypeStruct = defTypeStruct localTypes
 
-declGlobalVariable :: IsGen m => CType -> String -> Maybe String -> m CVariable
-declGlobalVariable  t n mv = do
-  let v = CVariable n t mv Nothing
-  globalVariables %= (++ [v]) 
-  return v
-
-declLocalVariable :: IsGen m => Maybe String -> CType -> String -> Maybe String -> BuildM m CVariable
-declLocalVariable ml t n mv = do
+declVariable :: (Lens' CodeStructure [CVariable]) -> Maybe String -> CType -> String -> Maybe String -> BuildM CVariable
+declVariable setter ml t n mv = do
   let v = CVariable n t mv ml
-  tell [Decl v]
+  scribe setter [v]
+  addVariable n v
   return v
 
-defGlobalFunction :: IsGen m => String -> [(CType, String)] -> CType -> ([CVariable] -> BuildM m a) -> m a
+declGlobalVariable :: CType -> String -> Maybe String -> BuildM CVariable
+declGlobalVariable = declVariable globalVariables Nothing
+
+declLocalVariable :: Maybe String -> CType -> String -> Maybe String -> BuildM CVariable
+declLocalVariable = declVariable localVariables
+
+-- 関数内での変数宣言
+declScopedVariable :: Maybe String -> CType -> String -> Maybe String -> BuildM CVariable
+declScopedVariable ml t n mv = do
+  let v = CVariable n t mv ml
+  stack <>= [Decl v]
+  return v
+
+defGlobalFunction :: String -> [(CType, String)] -> CType -> ([CVariable] -> BuildM a) -> BuildM a
 defGlobalFunction = defFunction globalFunctions
 
-defLocalFunction :: IsGen m => String -> [(CType, String)] -> CType -> ([CVariable] -> BuildM m a) -> m a
+defLocalFunction :: String -> [(CType, String)] -> CType -> ([CVariable] -> BuildM a) -> BuildM a
 defLocalFunction = defFunction localFunctions
 
-defFunction :: IsGen m => (Lens' CodeStructure [CFunction]) -> String -> [(CType, String)] -> CType -> ([CVariable] -> BuildM m a) -> m a
+defFunction :: (Lens' CodeStructure [CFunction]) -> String -> [(CType, String)] -> CType -> ([CVariable] -> BuildM a) -> BuildM a
 defFunction setter name args rt body = do
   let as = [CVariable n t Nothing Nothing | (t,n) <- args]
-  (res, stmts) <- build $ body as
-  setter %= (++ [CFunction name rt args stmts])
+  (res, stmts) <- scope $ body as
+  scribe setter [CFunction name rt args stmts]
   return res
 
-loop :: IsGen m => [Int] -> (Idx -> BuildM m ()) -> BuildM m ()
+loop :: [Int] -> (Idx -> BuildM ()) -> BuildM ()
 loop size body = do
   let idx = [("i" ++ show i, 0, s, 1) | (i,s) <- zip [1..(length size)] size]
   let d = length size
-  withOmp <- view (omGlobalEnvironment . envNumericalConfig . icWithOmp)
-  when (withOmp > 0) $ raw ("#pragma omp parallel for" ++ if d > 1 then " collapse(" ++ show d ++ ")" else "")
+  withOMP $ raw ("#pragma omp parallel for" ++ if d > 1 then " collapse(" ++ show d ++ ")" else "")
   loopWith idx body
 
-loopWith :: IsGen m => [(String,Int,Int,Int)] -> (Idx -> BuildM m ()) -> BuildM m ()
+loopWith :: [(String,Int,Int,Int)] -> (Idx -> BuildM ()) -> BuildM ()
 loopWith idx body = do
-  (_, stmt) <- lift $ build $ body $ toIdx [n | (n,_,_,_) <- idx]
-  tell [Loop idx stmt]
+  (_, stmt) <- scope $ body $ toIdx [n | (n,_,_,_) <- idx]
+  stack <>= [Loop idx stmt]
   return ()
 
 getSize :: CType -> [Int]
@@ -167,12 +241,12 @@ infixr 1 ><
 empty :: Idx
 empty = mempty
 
-copy :: (IsGen m, IsIdx a, IsIdx b) => CVariable -> CVariable -> a -> b -> BuildM m ()
+copy :: (IsIdx a, IsIdx b) => CVariable -> CVariable -> a -> b -> BuildM ()
 copy src tgt srcOffset tgtOffset = do
   let s = zipWith min (getSize $ variableType src) (getSize $ variableType tgt)
   loop s $ \idx -> do
     let fs = getFields src
-    tell [mkIdent f tgt (idx <> toIdx tgtOffset) @= mkIdent f src (idx <> toIdx srcOffset) | f <- fs, f `elem` (getFields tgt)]
+    stack <>= [mkIdent f tgt (idx <> toIdx tgtOffset) @= mkIdent f src (idx <> toIdx srcOffset) | f <- fs, f `elem` (getFields tgt)]
   return ()
 
 formatRank :: [Int] -> String
@@ -182,57 +256,53 @@ formatRank b = intercalate "_" [f i | i <- b]
             | x == -1 = "m1"
             | otherwise = error "Error in Formura.Generator.Functions.formatRank"
 
-sendrecv :: IsGen m => [(String,CType)] -> CVariable -> CVariable -> Int -> BuildM m ()
-sendrecv gridStruct src tgt s = do
-  rs <- isendrecv gridStruct src s
+sendrecv :: CVariable -> CVariable -> Int -> BuildM ()
+sendrecv src tgt s = do
+  rs <- isendrecv src s
   waitAndCopy rs tgt s
 
-isendrecv :: IsGen m => [(String,CType)] -> CVariable -> Int -> BuildM m ([CVariable],[CVariable],[CVariable])
-isendrecv gridStruct src s = do
+isendrecv :: CVariable -> Int -> BuildM ([CVariable],[CVariable],[CVariable])
+isendrecv src s = do
   mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
   bases <- view (omGlobalEnvironment . commBases)
   gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
-  commType <- defLocalTypeStruct "Formura_Comm_Buf" gridStruct Normal
   fmap unzip3 $ for bases $ \b -> do
-    let r = formatRank b
-    let r' = formatRank $ map negate b
-    sendbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("send_buf_" ++ r) Nothing
-    recvbuf <- declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("recv_buf_" ++ r') Nothing
+    sendbuf <- getSendBuf s b
+    recvbuf <- getRecvBuf s b
     copy src sendbuf [if d == 1 then n-2*s else 0 | (d,n) <- zip b gridPerNode] empty
     (sendReq, recvReq) <- case mmpiShape of
-                            Nothing -> copy sendbuf recvbuf empty empty >> return (sendbuf,recvbuf) -- この返り値はよくないが妥協した
-                            Just _ -> (,) <$> sendTo r sendbuf <*> recvFrom r' recvbuf
-    -- sendReq <- sendTo r sendbuf
-    -- recvReq <- recvFrom r' recvbuf
+                            Nothing -> copy sendbuf recvbuf empty empty >> return (error "never eval",error "never eval") -- あまりよいデザインではない気が...
+                            Just _ -> (,) <$> sendTo b sendbuf <*> recvFrom b recvbuf
     return (sendReq, recvReq, recvbuf)
 
-waitAndCopy :: IsGen m => ([CVariable],[CVariable],[CVariable]) -> CVariable -> Int -> BuildM m ()
+waitAndCopy :: ([CVariable],[CVariable],[CVariable]) -> CVariable -> Int -> BuildM ()
 waitAndCopy (sendReqs,recvReqs,recvBufs) tgt s = do
   bases <- view (omGlobalEnvironment . commBases)
-  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
-  when (isJust mmpiShape) $ do
+  withMPI $ \_ -> do
     mapM_ wait sendReqs
     mapM_ wait recvReqs
   sequence_ [copy recvBuf tgt empty [if d == 1 then 0 else 2*s | d <- b] | (b,recvBuf) <- zip bases recvBufs]
 
-sendTo :: IsGen m => String -> CVariable -> BuildM m CVariable
-sendTo r v = do
-  req <- declLocalVariable Nothing (CRawType "MPI_Request") ("send_req_" ++ r) Nothing
+sendTo :: [Int] -> CVariable -> BuildM CVariable
+sendTo b v = do
+  let r = formatRank b
+  req <- declScopedVariable Nothing (CRawType "MPI_Request") ("send_req_" ++ r) Nothing
   call "MPI_Isend" [ref v, "sizeof(" ++ variableName v ++ ")", "MPI_BYTE", "n->rank_" ++ r, "0", "n->mpi_world", ref req]
   return req
 
-recvFrom :: IsGen m => String -> CVariable -> BuildM m CVariable
-recvFrom r v = do
-  req <- declLocalVariable Nothing (CRawType "MPI_Request") ("recv_req_" ++ r) Nothing
+recvFrom :: [Int] -> CVariable -> BuildM CVariable
+recvFrom b v = do
+  let r = formatRank $ map negate b
+  req <- declScopedVariable Nothing (CRawType "MPI_Request") ("recv_req_" ++ r) Nothing
   call "MPI_Irecv" [ref v, "sizeof(" ++ variableName v ++ ")", "MPI_BYTE", "n->rank_" ++ r, "0", "n->mpi_world", ref req]
   return req
 
-wait :: IsGen m => CVariable -> BuildM m ()
+wait :: CVariable -> BuildM ()
 wait v = call "MPI_Wait" [ref v, "MPI_STATUS_IGNORE"]
 
-call :: IsGen m => String -> [String] -> BuildM m ()
+call :: String -> [String] -> BuildM ()
 call fn args = do
-  tell [Call fn args]
+  stack <>= [Call fn args]
   return ()
 
 ref :: CVariable -> String
@@ -245,10 +315,10 @@ ref (CVariable n t _ _) | isArray t = n
     isPtr (CPtr _) = True
     isPtr _ = False
 
-raw :: IsGen m => String -> BuildM m ()
+raw :: String -> BuildM ()
 raw c = do
-  tell [Raw c]
+  stack <>= [Raw c]
   return ()
 
-statement :: IsGen m => String -> BuildM m ()
+statement :: String -> BuildM ()
 statement s = raw $ s ++ ";"

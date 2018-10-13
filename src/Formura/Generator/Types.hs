@@ -10,10 +10,8 @@
 module Formura.Generator.Types where
 
 import Control.Lens
-import Control.Monad.Trans
-import Control.Monad.State
-import Control.Monad.Reader
-import Control.Monad.Writer
+import Control.Monad.RWS
+import qualified Data.HashMap.Lazy as HM
 
 import Formura.OrthotopeMachine.Graph
 
@@ -57,32 +55,35 @@ data CodeStructure = CodeStructure
   { _headers :: [String]
   , _definedParams :: [String]
   , _globalVariables :: [CVariable]
+  , _localVariables :: [CVariable]
   , _globalTypes :: [CTypedef]
   , _localTypes :: [CTypedef]
   , _globalFunctions :: [CFunction]
   , _localFunctions :: [CFunction]
-  , _hFileName :: String
-  , _cFileName :: String
   }
 
 makeLenses ''CodeStructure
 
-newtype GenM a = GenM { unwrapGenM :: ReaderT MMProgram (State CodeStructure) a }
-  deriving (Functor, Applicative, Monad, MonadReader MMProgram, MonadState CodeStructure)
+-- instance Semigroup CodeStructure where
+--   (CodeStructure h1 p1 gv1 lv1 gt1 lt1 gf1 lf1) <> (CodeStructure h2 p2 gv2 lv2 gt2 lt2 gf2 lf2) =
+--     CodeStructure (h1<>h2) (p1<>p2) (gv1<>gv2) (lv1<>lv2) (gt1<>gt2) (lt1<>lt2) (gf1<>gf2) (lf1<>lf2)
 
-generate :: MMProgram -> String -> String -> GenM () -> CodeStructure
-generate mm hfn cfn = (flip execState) cs0 . (flip runReaderT) mm . unwrapGenM
-  where cs0 = CodeStructure [] [] [] [] [] [] [] hfn cfn
+instance Monoid CodeStructure where
+  mempty = CodeStructure [] [] [] [] [] [] [] []
+  mappend (CodeStructure h1 p1 gv1 lv1 gt1 lt1 gf1 lf1) (CodeStructure h2 p2 gv2 lv2 gt2 lt2 gf2 lf2) =
+    CodeStructure (mappend h1 h2) (mappend p1 p2) (mappend gv1 gv2) (mappend lv1 lv2) (mappend gt1 gt2) (mappend lt1 lt2) (mappend gf1 gf2) (mappend lf1 lf2)
 
-newtype BuildM m a = BuildM { unwrapBuildM :: WriterT [CStatement] m a }
-  deriving (Functor, Applicative, Monad)
+data Table = Table
+  { _stack :: [CStatement]
+  , _variables :: HM.HashMap String CVariable
+  , _target :: [(String,CType)]
+  }
 
-deriving instance MonadReader MMProgram m => MonadReader MMProgram (BuildM m)
-deriving instance MonadState CodeStructure m => MonadState CodeStructure (BuildM m)
-deriving instance Monad m => MonadWriter [CStatement] (BuildM m)
-deriving instance MonadTrans BuildM
+makeLenses ''Table
 
-build :: IsGen m => BuildM m a -> m (a, [CStatement])
-build = runWriterT . unwrapBuildM
+type BuildM = RWS MMProgram CodeStructure Table
 
-type IsGen m = (MonadReader MMProgram m, MonadState CodeStructure m)
+genCodeStructure :: MMProgram -> BuildM () -> CodeStructure
+genCodeStructure mm f = snd $ evalRWS f mm t0
+  where t0 = Table [] HM.empty []
+

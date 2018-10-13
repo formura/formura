@@ -595,6 +595,20 @@ lookupToplevelIdents fprog name0 =  case lup stmts of
     lup (SubstF (Ident nam) rhs : xs) | nam == name0 = rhs : lup xs
     lup (_:xs) = lup xs
 
+-- FIX ME
+lookupToplevelIdents' :: Program -> IdentName -> GenM (Maybe RExpr)
+lookupToplevelIdents' fprog name0 =  case lup stmts of
+  [] -> return Nothing
+  [x] -> return (Just x)
+  _  -> raiseErr $ failed $ "Multiple declaration of identifier `" ++ name0 ++ "` found."
+  where
+    (Program _ (BindingF stmts) _) = fprog
+
+    lup :: [StatementF RExpr] -> [RExpr]
+    lup [] = []
+    lup (SubstF (Ident nam) rhs : xs) | nam == name0 = rhs : lup xs
+    lup (_:xs) = lup xs
+
 calcSleeve :: OMGraph -> Int
 calcSleeve g = maximum $ map traceNode $ findStore g
   where
@@ -633,6 +647,19 @@ genOMProgram fprog = do
     setupGlobalEnvironment fprog
     initFunDef <- lookupToplevelIdents fprog "init"
     genGlobalFunction gbinds (Tuple []) lhsOfStep initFunDef
+
+  (existFirstStep , stFirst, _) <- run $ do
+    setupGlobalEnvironment fprog
+    mfirstStepFunDef <- lookupToplevelIdents' fprog "first_step"
+    case mfirstStepFunDef of
+      Nothing -> return False
+      Just firstStepFunDef -> do
+        firstStepType <- genGlobalFunction gbinds initType lhsOfStep firstStepFunDef
+        when (initType /= firstStepType) $
+          raiseErr $ failed $ "the return type of first_step : " ++ show firstStepType ++ "\n" ++
+            "must match the return type of init : " ++ show initType
+        return True
+
   (stateSignature0, stStep, _) <- run $ do
     stepFunDef <- lookupToplevelIdents fprog "step"
     setupGlobalEnvironment fprog
@@ -645,12 +672,14 @@ genOMProgram fprog = do
     return $ M.fromList bs99
 
   let sleeve = calcSleeve (stStep ^. theGraph)
-  case convertConfig sleeve (fprog ^. programNumericalConfig) of
+      sleeve0 = if existFirstStep then Just (calcSleeve $ stFirst ^. theGraph) else Nothing
+  case convertConfig sleeve sleeve0 (fprog ^. programNumericalConfig) of
     Left err -> die $ "Error: " ++ displayException err
     Right cfg -> do
       return MachineProgram
         { _omGlobalEnvironment = (stInit ^. globalEnvironment) & envNumericalConfig .~ cfg
         , _omInitGraph = stInit ^. theGraph
+        , _omFirstStepGraph = if existFirstStep then Just (stFirst ^. theGraph) else Nothing
         , _omStepGraph = stStep ^. theGraph
         , _omStateSignature = stateSignature0
         }
