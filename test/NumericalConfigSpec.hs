@@ -24,6 +24,7 @@ spec = do
                   , _ncMPIShape = Just $ Vec [1]
                   , _ncGridPerBlock = Just (Vec [10])
                   , _ncTemporalBlockingInterval = Just 5
+                  , _ncFilterInterval = Nothing
                   , _ncWithOmp = Nothing
                   }
       decodeConfig cfg `shouldBe` (Right cfg')
@@ -33,6 +34,7 @@ spec = do
                           , "temporal_blocking_interval: 5"
                           , "grid_per_node: [10,10,10]"
                           , "grid_per_block: [10,10,10]"
+                          , "filter_interval: 100"
                           , "with_omp: 1"
                           ]
           cfg' = NumericalConfig
@@ -41,6 +43,7 @@ spec = do
                   , _ncMPIShape = Just $ Vec [2,2,2]
                   , _ncGridPerBlock = Just (Vec [10,10,10])
                   , _ncTemporalBlockingInterval = Just 5
+                  , _ncFilterInterval = Just 100
                   , _ncWithOmp = Just 1
                   }
       decodeConfig cfg `shouldBe` (Right cfg')
@@ -55,6 +58,7 @@ spec = do
                   , _ncMPIShape = Just $ Vec [2,2,2]
                   , _ncGridPerBlock = Nothing 
                   , _ncTemporalBlockingInterval = Nothing
+                  , _ncFilterInterval = Nothing
                   , _ncWithOmp = Nothing
                   }
       decodeConfig cfg `shouldBe` (Right cfg')
