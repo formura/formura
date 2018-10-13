@@ -10,6 +10,7 @@
 - Add `space_interval_x` field to `Formura_Navi` struct
 - Add `total_grid_x` field to `Formura_Navi` struct
 - Support `first_step`
+- Support `filter`
 
 ## version 2.2
 
