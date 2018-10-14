@@ -29,6 +29,11 @@ withOMP f = do
   omp <- view (omGlobalEnvironment . envNumericalConfig . icWithOmp)
   when (omp > 0) $ f
 
+withProf :: BuildM () -> BuildM ()
+withProf f = do
+  prof <- view (omGlobalEnvironment . envNumericalConfig . icWithProf)
+  when prof $ f
+
 withFirstStep :: (MMGraph -> BuildM ()) -> BuildM ()
 withFirstStep f = do
   mfirstStepGraph <- view omFirstStepGraph
