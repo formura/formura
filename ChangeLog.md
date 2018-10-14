@@ -11,6 +11,7 @@
 - Add `total_grid_x` field to `Formura_Navi` struct
 - Support `first_step`
 - Support `filter`
+- Support profiler
 
 ## version 2.2
 
