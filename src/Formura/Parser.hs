@@ -23,7 +23,6 @@ import           Data.Char (isAlphaNum, isLetter, isPrint, isSpace)
 import           Data.Either (partitionEithers)
 import           Data.Foldable (toList)
 import           Data.Maybe
-import           Data.Monoid
 import           Data.Ratio
 import qualified Data.Set as S
 import qualified Text.Parser.Expression as X

@@ -9,7 +9,6 @@ import Data.Foldable (toList, for_)
 import Data.List
 import qualified Data.Map as M
 import Data.Maybe (fromJust)
-import Data.Monoid
 import Text.Printf
 
 import Formura.NumericalConfig
