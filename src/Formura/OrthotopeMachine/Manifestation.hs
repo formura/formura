@@ -210,6 +210,7 @@ manifestation :: WithCommandLineOption => OMProgram -> TranM MMProgram
 manifestation omprog = do
   ig2 <- manifestG $ omprog ^. omInitGraph
   fsg2 <- sequence $ manifestG <$> omprog ^. omFirstStepGraph
+  flg2 <- sequence $ manifestG <$> omprog ^. omFilterGraph
   sg2 <- manifestG $ omprog ^. omStepGraph
 
   return $ MachineProgram
@@ -217,6 +218,7 @@ manifestation omprog = do
     , _omStateSignature    = omprog ^. omStateSignature
     , _omInitGraph         = ig2
     , _omFirstStepGraph    = fsg2
+    , _omFilterGraph       = flg2
     , _omStepGraph         = sg2
     }
 

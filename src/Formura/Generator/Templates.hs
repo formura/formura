@@ -43,6 +43,7 @@ scaffold = do
 
   defFormuraSetup
   withFirstStep defFormuraFirstStep
+  withFilter defFormuraFilter
   defFormuraInit navi
   defFormuraStep
   defFormuraForward
@@ -133,6 +134,9 @@ defLocalBuffs NoBlocking = do
   withFirstStep $ \_ -> do
     addVariable "first_input" buff
     addVariable "first_output" globalData
+  withFilter $ \_ -> do
+    addVariable "filter_input" buff
+    addVariable "filter_output" globalData
 defLocalBuffs (TemporalBlocking gridPerBlock blockPerNode nt) = do
   s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
   dim <- view (omGlobalEnvironment . dimension)
@@ -162,6 +166,9 @@ defLocalBuffs (TemporalBlocking gridPerBlock blockPerNode nt) = do
   withFirstStep $ \_ -> do
     addVariable "first_input" tmpFloor
     addVariable "first_output" globalData
+  withFilter $ \_ -> do
+    addVariable "filter_input" tmpFloor
+    addVariable "filter_output" globalData
 
 defCommBuffs :: BuildM ()
 defCommBuffs = do
@@ -251,6 +258,16 @@ defFormuraFirstStep g = do
   defLocalFunction "Formura_First_Step" [(CRawType "Formura_Navi *", "n")] CVoid $ \_ ->
       noBlocking buff rslt s "Formura_First_Step_Kernel"
 
+defFormuraFilter :: MMGraph -> BuildM ()
+defFormuraFilter g = do
+  blockOffset <- getBlockOffsets
+  buff <- getVariable "filter_input"
+  rslt <- getVariable "filter_output"
+  s <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icFilterSleeve)
+  defLocalFunction "Formura_Filter_Kernel" ([(CPtr $ variableType buff, "buff"), (CPtr $ variableType rslt, "rslt"),(CRawType "Formura_Navi", "n")] ++ blockOffset) CVoid (mkKernel g s)
+  defLocalFunction "Formura_Filter" [(CRawType "Formura_Navi *", "n")] CVoid $ \_ ->
+      noBlocking buff rslt s "Formura_Filter_Kernel"
+
 defFormuraSetup :: BuildM ()
 defFormuraSetup = do
   blockOffset <- getBlockOffsets
@@ -284,6 +301,11 @@ defFormuraForward = do
       rslt <- getVariable "step_output"
       s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
       noBlocking buff rslt s "Formura_Step"
+      withFilter $ \_ -> do
+        filterInterval <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icFilterInterval)
+        raw $ printf "if (n->time_step %% %d == 0) {" filterInterval
+        call "Formura_Filter" ["n"]
+        raw $ "}"
       statement "n->time_step += 1"
     forwardBody (TemporalBlocking gridPerBlock blockPerNode nt) = do
       s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
@@ -301,6 +323,11 @@ defFormuraForward = do
       waitAndCopy rs tmpFloor (s*nt)
       mapM_ update bs
       copy tmpFloor globalData empty empty
+      withFilter $ \_ -> do
+        filterInterval <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icFilterInterval)
+        raw $ printf "if (n->time_step %% %d == 0) {" filterInterval
+        call "Formura_Filter" ["n"]
+        raw $ "}"
       statement $ "n->time_step += " ++ show nt
 
 noBlocking :: CVariable -> CVariable -> Int -> String -> BuildM ()

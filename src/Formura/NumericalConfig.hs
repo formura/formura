@@ -26,6 +26,7 @@ data NumericalConfig = NumericalConfig
   , _ncGridPerNode :: Vec Int
   , _ncGridPerBlock :: Maybe (Vec Int)
   , _ncTemporalBlockingInterval :: Maybe Int
+  , _ncFilterInterval :: Maybe Int
   , _ncMPIShape :: Maybe (Vec Int)
   , _ncWithOmp :: Maybe Int
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
@@ -58,6 +59,7 @@ decodeConfig str = check =<< first ConfigException (Y.decodeEither str)
               | maybe False null (cfg ^. ncGridPerBlock) = Left $ ConfigException "grid_per_block should be a nonempty list"
               | maybe False null (cfg ^. ncMPIShape) = Left $ ConfigException "mpi_shape should be a nonempty list"
               | maybe False (< 1) (cfg ^. ncTemporalBlockingInterval) = Left $ ConfigException "temporal_blocking_interval should be a positive integer"
+              | maybe False (< 1) (cfg ^. ncFilterInterval) = Left $ ConfigException "filter_interval should be a positive integer"
               | maybe False (\i -> i `notElem` [0,1,2]) (cfg ^. ncWithOmp) = Left $ ConfigException "with_omp should be 0, 1 or 2"
               | otherwise = Right cfg
 
@@ -84,6 +86,8 @@ data InternalConfig = InternalConfig
   , _icBlockingType :: BlockingType
   , _icSleeve :: Int
   , _icSleeve0 :: Maybe Int
+  , _icFilterSleeve :: Maybe Int
+  , _icFilterInterval :: Maybe Int
   , _icMPIShape :: Maybe [Int]
   , _icWithOmp :: Int
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
@@ -98,12 +102,14 @@ defaultInternalConfig = InternalConfig
   , _icBlockingType = NoBlocking
   , _icSleeve = 1
   , _icSleeve0 = Nothing
+  , _icFilterSleeve = Nothing
+  , _icFilterInterval = Nothing
   , _icMPIShape = Nothing
   , _icWithOmp = 0
   }
 
-convertConfig :: Int -> Maybe Int -> NumericalConfig -> Either ConfigException InternalConfig
-convertConfig s s0 nc = check ic
+convertConfig :: Int -> Maybe Int -> Maybe Int -> NumericalConfig -> Either ConfigException InternalConfig
+convertConfig s s0 sf nc = check ic
   where
     nt = fromMaybe 1 (nc ^. ncTemporalBlockingInterval)
     totalGrids = (nc ^. ncGridPerNode) + pure (2*s*nt)
@@ -122,6 +128,8 @@ convertConfig s s0 nc = check ic
           , _icBlockingType = bt
           , _icSleeve = s
           , _icSleeve0 = s0
+          , _icFilterSleeve = sf
+          , _icFilterInterval = nc ^. ncFilterInterval
           , _icMPIShape = toList <$> nc ^. ncMPIShape
           , _icWithOmp = fromMaybe 0 $ nc ^. ncWithOmp
           }
@@ -130,6 +138,7 @@ convertConfig s s0 nc = check ic
     check cfg | any (<0) (cfg ^. icLengthPerNode) = Left $ ConfigException "the element of length_per_node should be a positive number"
               | any (<1) (cfg ^. icGridPerNode) = Left $ ConfigException "the element of grid_per_node should be a positive integer"
               | maybe False (any (<1)) (cfg ^. icMPIShape) = Left $ ConfigException "the element of mpi_shape should be a positive integer"
+              | maybe False (\ft -> ft `mod` nt /= 0) (cfg ^. icFilterInterval) = Left $ ConfigException "the filter interval is a multiple of temporal blocking interval"
               | maybe False (any (/=0)) ms = Left $ ConfigException "Inconsistent config"
               | otherwise = Right cfg
 
