@@ -1,5 +1,5 @@
 # Changelog for formura
-## HEAD
+## version 2.3
 
 - Run also without MPI
 - Implement LoadIndex
