@@ -6,7 +6,6 @@ import           Control.Exception
 import           Control.Lens
 import           Control.Monad
 import qualified Data.Map as M
-import           Data.Monoid
 import           System.IO
 import           System.Exit
 import qualified Text.PrettyPrint.ANSI.Leijen as Ppr

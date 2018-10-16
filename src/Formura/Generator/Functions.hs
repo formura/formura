@@ -8,7 +8,6 @@ import Control.Lens
 import Control.Monad
 import qualified Data.HashMap.Lazy as HM
 import Data.Maybe (maybeToList)
-import Data.Monoid
 import Data.List (intercalate, sort, nub)
 import Data.Traversable (for)
 import Text.Printf (printf)
@@ -234,12 +233,11 @@ instance IsIdx [Int] where
 instance Show Idx where
   show (Idx is) = concat ["[" ++ i ++ "]" | i <- is]
 
--- instance Semigroup Idx where
---   (Idx is) <> (Idx is') = Idx (zipWith (++) is is')
+instance Semigroup Idx where
+  (Idx is) <> (Idx is') = Idx (zipWith (++) is is')
 
 instance Monoid Idx where
   mempty = toIdx @[Int] (repeat 0)
-  mappend (Idx is) (Idx is') = Idx (zipWith (++) is is')
 
 (><) :: Idx -> Idx -> Idx
 (Idx is) >< (Idx is') = Idx (is ++ is')

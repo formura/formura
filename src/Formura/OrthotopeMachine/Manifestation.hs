@@ -27,7 +27,6 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import qualified Data.Map as M
 import           Data.Maybe
-import           Data.Monoid
 import qualified Data.Set as S
 import           Text.Trifecta (failed, raiseErr)
 

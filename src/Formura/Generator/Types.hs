@@ -64,14 +64,12 @@ data CodeStructure = CodeStructure
 
 makeLenses ''CodeStructure
 
--- instance Semigroup CodeStructure where
---   (CodeStructure h1 p1 gv1 lv1 gt1 lt1 gf1 lf1) <> (CodeStructure h2 p2 gv2 lv2 gt2 lt2 gf2 lf2) =
---     CodeStructure (h1<>h2) (p1<>p2) (gv1<>gv2) (lv1<>lv2) (gt1<>gt2) (lt1<>lt2) (gf1<>gf2) (lf1<>lf2)
+instance Semigroup CodeStructure where
+  (CodeStructure h1 p1 gv1 lv1 gt1 lt1 gf1 lf1) <> (CodeStructure h2 p2 gv2 lv2 gt2 lt2 gf2 lf2) =
+    CodeStructure (h1<>h2) (p1<>p2) (gv1<>gv2) (lv1<>lv2) (gt1<>gt2) (lt1<>lt2) (gf1<>gf2) (lf1<>lf2)
 
 instance Monoid CodeStructure where
   mempty = CodeStructure [] [] [] [] [] [] [] []
-  mappend (CodeStructure h1 p1 gv1 lv1 gt1 lt1 gf1 lf1) (CodeStructure h2 p2 gv2 lv2 gt2 lt2 gf2 lf2) =
-    CodeStructure (mappend h1 h2) (mappend p1 p2) (mappend gv1 gv2) (mappend lv1 lv2) (mappend gt1 gt2) (mappend lt1 lt2) (mappend gf1 gf2) (mappend lf1 lf2)
 
 data Table = Table
   { _stack :: [CStatement]

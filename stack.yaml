@@ -1,7 +1,10 @@
 flags: {}
 packages:
 - .
-extra-deps: []
-local-bin-path: ./bin
-resolver: lts-10.4
+extra-deps:
+- sbv-7.12
+- crackNum-2.2
+- FloatingHex-0.4
+# local-bin-path: ./bin
+resolver: lts-12.13
 # skip-ghc-check: True

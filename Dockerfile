@@ -13,7 +13,7 @@ RUN stack setup
 COPY package.yaml /work/
 RUN stack build --only-dependencies
 COPY . /work/
-RUN stack install
+RUN stack install --local-bin-path ./bin
 
 FROM debian:9
 RUN apt-get update && \
@@ -23,5 +23,7 @@ RUN apt-get update && \
 COPY --from=builder /work/bin/formura /usr/local/bin/
 
 ENV LANG C.UTF-8
+RUN mkdir /work && useradd -ms /bin/bash formura
+USER formura
 WORKDIR /work
 CMD ["bash"]
