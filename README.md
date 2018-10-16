@@ -20,26 +20,41 @@ Note: The originary repo is <https://github.com/nushio3/formura>.
 
 OS: Ubuntu 18.04
 
-## Preparation for compiling Formura
+## Using docker
+### Pull the image of formura
+
+```
+docker pull formura/formura
+```
+
+### Execute examples
+
+```
+git clone git@github.com:formura/formura.git
+cd formura/examples/diffusion1
+docker run -it --rm -u $UID:$GID -v $PWD:/work formura/formura make run
+```
+
+## Build from source
+### Preparation for compiling Formura
 
 ```
 apt install build-essential git mpi-default-dev libtinfo-dev
 wget -qO- https://get.haskellstack.org/ | sh # installation of the Haskell tool Stack
 ```
 
-## Compile Formura
+### Compile Formura
 
 ```
 git clone git@github.com:formura/formura.git
 cd formura
-stack build
+stack install
 ```
 
 Add the path of the binary execution file of Formura to the `$PATH` variable of your shell.
-The path of the binary execution file is, for example, `${HOME}/.stack-work/install/x86_64-linux/lts-10.4/8.2.2/bin/`.
+The path of the binary execution file is, for example, `${HOME}/.local/bin`.
 
-
-## Execute examples
+### Execute examples
 
 ```
 cd formura/examples/diffusion1
