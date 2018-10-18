@@ -334,9 +334,7 @@ defFormuraForward = do
       buff <- getVariable "step_input"
       rslt <- getVariable "step_output"
       s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
-      withProf $ call "start_kernel" []
       noBlocking buff rslt s "Formura_Step"
-      withProf $ call "end_kernel" []
       withFilter $ \_ -> do
         filterInterval <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icFilterInterval)
         raw $ printf "if (n->time_step %% %d == 0) {" filterInterval
@@ -375,7 +373,9 @@ noBlocking buff rslt s kernelName = do
   sendrecv globalData buff s
   copy globalData buff empty (repeat $ 2*s)
   -- 1ステップ更新
+  withProf $ when (kernelName == "Formura_Step") $ call "start_kernel" []
   call kernelName ([ref buff, ref rslt, "*n"] ++ replicate dim "0")
+  withProf $ when (kernelName == "Formura_Step") $ call "end_kernel" []
   for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a s a a
 
 updateWithTB :: [Int] -> [Int] -> Int -> [(Int,Int)] -> BuildM ()
