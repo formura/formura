@@ -1,0 +1,25 @@
+#!/usr/bin/zsh
+
+f=${1:?Need a file name}
+tmp=data/tmp.dat
+
+cat ${f} | sort -nk1,2 | awk 'x==$1{print}x!=$1{print "";print;x=$1}' > ${tmp}
+
+gnuplot <<END
+set term pdf size 8in,3in
+set output "plot_result.pdf"
+set tmargin 3
+set bmargin 4
+set lmargin 5
+set rmargin 2
+set key at screen 1,0.1 opaque
+set style data linespoints
+set pm3d map
+set palette define (0"#000090",1"#000fff",2"#0090ff",3"#0fffee",4"#90ff70",5"#ffee00",6"#ff7000",7"#ee0000",8"#7f0000")
+set size square
+set multiplot layout 1,2
+splot "${tmp}" u 1:2:3
+splot "${tmp}" u 1:2:4
+END
+
+rm -f ${tmp}

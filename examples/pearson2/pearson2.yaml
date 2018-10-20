@@ -1,0 +1,6 @@
+length_per_node: [1.0,1.0]
+grid_per_node: [100,100]
+# grid_per_block: [10,10]
+# temporal_blocking_interval: 5
+# mpi_shape: [1,1]
+with_omp: 1

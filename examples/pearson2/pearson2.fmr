@@ -1,0 +1,30 @@
+dimension :: 2
+axes :: x,y
+
+double :: f = 0.03
+double :: k = 0.06
+double :: ru = 2*10**(-5)
+double :: rv = 1*10**(-5)
+double :: dt = 1
+
+extern function :: fabs
+
+d_xx = fun(q) (q[i+1,j] + q[i-1,j] - 2*q[i,j])/(dx*dx)
+d_yy = fun(q) (q[i,j+1] + q[i,j-1] - 2*q[i,j])/(dy*dy)
+dd = fun(q) (d_xx(q) + d_yy(q))
+isCenter = fun(i,j,w) (fabs(total_grid_x/2-i) < w) && (fabs(total_grid_y/2-j) < w)
+
+begin function (u_t, v_t) = d_t(u,v)
+  u_t = ru*(dd u) - u*v*v + f*(1-u)
+  v_t = rv*(dd v) + u*v*v - (f+k)*v
+end function
+
+begin function (u,v) = init()
+  double[] :: u, v
+  u[i,j] = if isCenter(i,j,5) then 1/2 else 1.0
+  v[i,j] = if isCenter(i,j,5) then 1/4 else 0.0
+end function
+
+begin function (u',v') = step(u,v)
+  (u',v') = (u,v) + dt*d_t(u,v)
+end function
