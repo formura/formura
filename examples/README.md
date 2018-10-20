@@ -2,5 +2,5 @@
 
 ```
 $ cd diffusion1
-$ docker run -it --rm -v $PWD:/work -u $UID:$GID -w /work ishiy1993/formura:2.2 make run
+$ docker run -it --rm -v $PWD:/work -u $UID:$GID -w /work formura/formura make run
 ```
