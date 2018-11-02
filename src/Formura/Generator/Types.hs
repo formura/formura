@@ -13,7 +13,7 @@ import Control.Lens
 import Control.Monad.RWS
 import qualified Data.HashMap.Lazy as HM
 
-import Formura.OrthotopeMachine.Graph
+import Formura.IR
 
 data CType = CVoid
            | CInt
@@ -79,9 +79,9 @@ data Table = Table
 
 makeLenses ''Table
 
-type BuildM = RWS MMProgram CodeStructure Table
+type BuildM = RWS IRProgram CodeStructure Table
 
-genCodeStructure :: MMProgram -> BuildM () -> CodeStructure
-genCodeStructure mm f = snd $ evalRWS f mm t0
+genCodeStructure :: IRProgram -> BuildM () -> CodeStructure
+genCodeStructure ir f = snd $ evalRWS f ir t0
   where t0 = Table [] HM.empty []
 

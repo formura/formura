@@ -16,6 +16,7 @@ import           Formura.Annotation.Representation
 import           Formura.CommandLineOption
 import           Formura.Desugar
 import           Formura.NumericalConfig
+import           Formura.IR
 import           Formura.Generator (genCode)
 import           Formura.OrthotopeMachine.Graph
 import           Formura.OrthotopeMachine.Manifestation (genMMProgram)
@@ -91,7 +92,8 @@ codegen sugarcoated_prog = do
     putStrLn ""
 
   putStrLn "Generating code..."
-  genCode mmProg
+  let irProg = genIRProgram mmProg
+  genCode irProg
 
 pprNode :: (OMNodeID, OMNode) -> IO ()
 pprNode (i,n) = do

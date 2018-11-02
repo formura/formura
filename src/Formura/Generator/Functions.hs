@@ -14,8 +14,8 @@ import Text.Printf (printf)
 
 import Formura.NumericalConfig
 import Formura.GlobalEnvironment
-import Formura.OrthotopeMachine.Graph
 import Formura.Generator.Types
+import Formura.IR
 
 withMPI :: ([Int] -> BuildM ()) -> BuildM ()
 withMPI f = do
@@ -29,16 +29,16 @@ withOMP f = do
   omp <- view (globalEnvironment . envNumericalConfig . icWithOmp)
   when (omp > 0) $ f
 
-withFirstStep :: (MMGraph -> BuildM ()) -> BuildM ()
+withFirstStep :: (IRGraph -> BuildM ()) -> BuildM ()
 withFirstStep f = do
-  mfirstStepGraph <- view omFirstStepGraph
+  mfirstStepGraph <- view irFirstStepGraph
   case mfirstStepGraph of
     Nothing -> return ()
     Just g -> f g
 
-withFilter :: (MMGraph -> BuildM ()) -> BuildM ()
+withFilter :: (IRGraph -> BuildM ()) -> BuildM ()
 withFilter f = do
-  mfilterGraph <- view omFilterGraph
+  mfilterGraph <- view irFilterGraph
   case mfilterGraph of
     Nothing -> return ()
     Just g -> f g

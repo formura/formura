@@ -14,14 +14,14 @@ import Formura.Generator.Encode
 import Formura.Generator.Types
 import Formura.Generator.Templates
 import Formura.NumericalConfig
-import Formura.OrthotopeMachine.Graph
+import Formura.IR
 
-genCode :: WithCommandLineOption => MMProgram -> IO ()
-genCode mm = do
-  let ic = mm ^. globalEnvironment . envNumericalConfig
+genCode :: WithCommandLineOption => IRProgram -> IO ()
+genCode ir = do
+  let ic = ir ^. globalEnvironment . envNumericalConfig
   let totalMPI = product <$> ic ^. icMPIShape
 
-  let cs = genCodeStructure mm scaffold
+  let cs = genCodeStructure ir scaffold
       (hContent, cContent) = render hxxFilePath cs
 
   let runningScriptPath = "run"

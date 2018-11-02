@@ -27,7 +27,7 @@ instance Read IRNodeID where
 
 data IRGraph = IRGraph
   { tmpArrays :: [(String,OMNodeType,Int)]
-  , kernels :: M.Map IRNodeID MMNode
+  , kernels :: M.Map IRNodeID (Int,MMNode)
   }
 
 -- IRProgram is MMProgram whose manifest nodes are merged
@@ -58,8 +58,8 @@ genIRProgram mmp =
 
 mkIRGraph :: MMGraph -> IRGraph
 mkIRGraph mmg = IRGraph { tmpArrays = tmps
-                            , kernels = g
-                            }
+                        , kernels = g
+                        }
   where
     tmpPrefix = "formura_mn_"
     tmpName oid = tmpPrefix ++ show oid
@@ -73,7 +73,7 @@ mkIRGraph mmg = IRGraph { tmpArrays = tmps
     -- 一時変数の特定とStoreの発行 & LoadCursorをLoadCursorStaticに
     -- マージ可能なMMNodeを集める
     -- マージする
-    g = M.fromList $ zipWith (\i n -> (IRNodeID i,n)) [0..] $ map (updateLoadCursor tmpName getSize . mergeMMNodes) $ groupMMNodes mmg'
+    g = M.fromList $ zipWith (\i n -> (IRNodeID i,n)) [0..] $ map (fmap (updateLoadCursor tmpName getSize . mergeMMNodes)) $ groupMMNodes getSize mmg'
 
 -- Manifestノードの配列サイズを計算する
 -- もとの配列サイズ NX+2Ns に比べてどれだけ小さいかを求める
@@ -107,16 +107,17 @@ insertMNSotres tmpName = M.mapWithKey (\omid n@(Node mm omt x) -> if isVoid omt 
             node = Node (Store (tmpName oid) (MMNodeID $ mmid-1)) (ElemType "void") []
 
 -- 各Manifest node間の依存関係を調べ、依存関係がないもの同士をまとめる
-groupMMNodes :: MMGraph -> [[(OMNodeID, MMNode)]]
-groupMMNodes mmg = foldr (\x acc -> add x acc) [] $ M.toAscList mmg
+groupMMNodes :: (OMNodeID -> Int) -> MMGraph -> [(Int, [(OMNodeID, MMNode)])]
+groupMMNodes getSize mmg = foldr (\x acc -> add x acc) [] $ M.toAscList mmg
   where
     loadFrom mm ids = let f (LoadCursor _ oid) = oid `elem` ids
                           f _ = False
                        in not $ M.null $ M.filter (\(Node inst _ _) -> f inst) mm
     dep (_,Node mm _ _) g = mm `loadFrom` (map fst g)
-    add x [] = [[x]]
-    add x (g:gs) | dep x g = g:(add x gs)
-                 | otherwise = (g ++ [x]):gs
+    add x [] = [(getSize $ fst x,[x])]
+    add x ((s,g):gs) | dep x g = (s,g):(add x gs)
+                     | s /= (getSize $ fst x) = (s,g):(add x gs)
+                     | otherwise = (s,g ++ [x]):gs
 
 mergeMMNodes :: [(OMNodeID, MMNode)] -> MMNode
 mergeMMNodes = foldl' (\(Node mm0 t a) (_,Node mm1 _ _) -> Node (merge mm0 mm1) t a) (Node M.empty (ElemType "void") [])

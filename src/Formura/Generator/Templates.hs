@@ -55,7 +55,7 @@ defGlobalData = do
   gridPerNode <- view (globalEnvironment . envNumericalConfig . icGridPerNode)
   typeName <- view (globalEnvironment . gridStructTypeName)
   insntaceName <- view (globalEnvironment . gridStructInstanceName)
-  gridStruct <- mkFields <$> view omStateSignature
+  gridStruct <- mkFields <$> view irStateSignature
   target .= gridStruct
   gridStructType <- defGlobalTypeStruct typeName gridStruct (SoA gridPerNode)
   () <$ declGlobalVariable gridStructType insntaceName Nothing
@@ -249,7 +249,7 @@ defFormuraInit navi = do
       call "Formura_Setup" ("*n":replicate dim "0")
       withFirstStep $ \_ -> call "Formura_First_Step" ["n"]
 
-defFormuraFirstStep :: MMGraph -> BuildM ()
+defFormuraFirstStep :: IRGraph -> BuildM ()
 defFormuraFirstStep g = do
   blockOffset <- getBlockOffsets
   buff <- getVariable "first_input"
@@ -259,7 +259,7 @@ defFormuraFirstStep g = do
   defLocalFunction "Formura_First_Step" [(CRawType "Formura_Navi *", "n")] CVoid $ \_ ->
       noBlocking buff rslt s "Formura_First_Step_Kernel"
 
-defFormuraFilter :: MMGraph -> BuildM ()
+defFormuraFilter :: IRGraph -> BuildM ()
 defFormuraFilter g = do
   blockOffset <- getBlockOffsets
   buff <- getVariable "filter_input"
@@ -276,8 +276,8 @@ defFormuraSetup = do
   where
     setupBody = do
       globalData <- getGlobalData
-      mmg <- view omInitGraph
-      mkKernel mmg 0 [globalData,globalData]
+      irg <- view irInitGraph
+      mkKernel irg 0 [globalData,globalData]
 
 defFormuraStep :: BuildM ()
 defFormuraStep = do
@@ -289,8 +289,8 @@ defFormuraStep = do
     stepBody :: [CVariable] -> BuildM ()
     stepBody args = do
       s <- view (globalEnvironment . envNumericalConfig . icSleeve)
-      mmg <- view omStepGraph
-      mkKernel mmg s args
+      irg <- view irStepGraph
+      mkKernel irg s args
 
 defFormuraForward :: BuildM ()
 defFormuraForward = do
@@ -324,7 +324,7 @@ defFormuraForward = do
       waitAndCopy rs tmpFloor (s*nt)
       mapM_ update bs
       copy tmpFloor globalData empty empty
-      axes <- view (omGlobalEnvironment . axesNames)
+      axes <- view (globalEnvironment . axesNames)
       for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a (s*nt) a a
       withFilter $ \_ -> do
         filterInterval <- fromJust <$> view (globalEnvironment . envNumericalConfig . icFilterInterval)
@@ -347,8 +347,8 @@ noBlocking buff rslt s kernelName = do
 
 updateWithTB :: [Int] -> [Int] -> Int -> [(Int,Int)] -> BuildM ()
 updateWithTB gridPerBlock blockPerNode nt boundary = loopWith [("j" ++ show @Int i,l,u,1) | (i,(l,u)) <- zip [1..] boundary] $ \idx -> do
-  dim <- view (omGlobalEnvironment . dimension)
-  s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
+  dim <- view (globalEnvironment . dimension)
+  s <- view (globalEnvironment . envNumericalConfig . icSleeve)
   tmpFloor <- getVariable "tmp_floor"
   tmpWalls <- forM [([i == j | j <- [1..dim]],i) | i <- [1..dim]] $ \(flag,i) -> do
     let gs = [if b then 2*s else n+2*s | (n,b) <- zip gridPerBlock flag]
@@ -385,103 +385,62 @@ defFormuraFinalize =
   defGlobalFunction "Formura_Finalize" [] CVoid $ \_ ->
     withMPI $ \_ -> call "MPI_Finalize" []
 
-data MMRange = MMRange
-  { lower :: !Int
-  , upper :: !Int
-  }
-
-instance Semigroup MMRange where
-  x <> y = MMRange { lower = lower x `min` lower y
-                   , upper = upper x `max` upper y
-                   }
-
-instance Monoid MMRange where
-  mempty = MMRange 0 0
-
-mergeRange :: MMRange -> MMRange -> MMRange
-mergeRange x y = MMRange { lower = lower x + lower y
-                         , upper = upper x + upper y
-                         }
-
-fromCursor :: Vec Int -> MMRange
-fromCursor s = MMRange { lower = minimum s
-                       , upper = maximum s
-                       }
-
-toSize :: MMRange -> Int
-toSize (MMRange {..}) = abs lower + abs upper
-
-toOffset :: MMRange -> Int
-toOffset = abs . lower
-
-calcRange :: MMGraph -> M.Map OMNodeID MMRange
-calcRange = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) acc) M.empty
-  where
-    worker :: MMInstruction -> M.Map OMNodeID MMRange -> MMRange
-    worker mi tbl = M.foldl' go mempty mi
-      where go rng (Node (LoadCursorStatic s _) _ _) = rng <> fromCursor s
-            go rng (Node (LoadCursor s oid) _ _) = rng <> mergeRange (fromCursor s) (tbl M.! oid)
-            go rng _ = rng
-
-mkKernel :: MMGraph -> Int -> [CVariable] -> BuildM ()
-mkKernel mmg sleeve args = do
-  -- FIX ME
+mkKernel :: IRGraph -> Int -> [CVariable] -> BuildM ()
+mkKernel irg sleeve args = do
+  let tmps = tmpArrays irg
+      ks = kernels irg
+      isTmp n = n `elem` [n0 | (n0,_,_) <- tmps]
   let outputSize = getSize $ variableType $ args !! 1
       inputSize = map (+ (2*sleeve)) outputSize
-  let rangeTable = calcRange mmg
-  axes <- view (omGlobalEnvironment . axesNames)
-  -- 中間変数を生成するかどうかを判定する
-  -- 型が void なら最後に Store されているはずなので、中間変数を生成しない
-  -- そうでないなら、最後に型に合う変数に結果を書き込む必要がある (最後に命令として Store がない)
-  let isVoid (ElemType "void") = True
-      isVoid _                 = False
+  defTmpArrays inputSize tmps
+  for_ (M.toAscList ks) $ \(_,mm) -> genKernel args isTmp inputSize mm
 
-      tmpPrefix = "formura_mn"
-      tmpName oid = tmpPrefix ++ show oid
+defTmpArrays :: [Int] -> [(String,OMNodeType,Int)] -> BuildM ()
+defTmpArrays inputSize ts = for_ ts $ \(n,t,s) ->
+  declScopedVariable (Just "static") (mapTmpType s t) n Nothing
+  where
+    mapTmpType :: Int -> OMNodeType -> CType
+    mapTmpType _ (ElemType "Rational") = CDouble
+    mapTmpType _ (ElemType "void") = CVoid
+    mapTmpType _ (ElemType "double") = CDouble
+    mapTmpType _ (ElemType "float") = CFloat
+    mapTmpType _ (ElemType "int") = CInt
+    mapTmpType _ (ElemType x) = CRawType x
+    mapTmpType ds (GridType _ x) = CArray [s-2*ds | s <- inputSize] (mapTmpType ds x)
+    mapTmpType _ _ = error "Invalid type"
 
-      insertMNStore :: OMNodeID -> MMInstruction -> MMInstruction
-      insertMNStore oid mm = M.insert (MMNodeID mmid) node mm
-        where mmid = M.size mm
-              node = Node (Store (tmpName oid) (MMNodeID $ mmid-1)) (ElemType "void") []
-  let (tmps, mmg') = M.foldrWithKey (\omid (Node mm omt x) (ts,g) -> if isVoid omt then (ts,M.insert omid (Node mm omt x) g) else ((omid,omt):ts,M.insert omid (Node (insertMNStore omid mm) omt x) g)) ([],M.empty) mmg
-  -- 中間変数の宣言
-  let mapTmpType :: Int -> OMNodeType -> CType
-      mapTmpType _ (ElemType "Rational") = CDouble
-      mapTmpType _ (ElemType "void") = CVoid
-      mapTmpType _ (ElemType "double") = CDouble
-      mapTmpType _ (ElemType "float") = CFloat
-      mapTmpType _ (ElemType "int") = CInt
-      mapTmpType _ (ElemType x) = CRawType x
-      mapTmpType ds (GridType _ x) = CArray [s-ds | s <- inputSize] (mapTmpType ds x)
-      mapTmpType _ _ = error "Invalid type"
-  sequence_ [declScopedVariable (Just "static") (mapTmpType (toSize $ rangeTable M.! omid) omt) (tmpName omid) Nothing | (omid,omt) <- tmps]
-  -- 命令の変換
-  let formatNode i = "a" ++ show i
-      mapType' :: MicroNodeType -> CType
-      mapType' (ElemType "Rational") = CDouble
-      mapType' (ElemType "void")     = CVoid
-      mapType' (ElemType "double")   = CDouble
-      mapType' (ElemType "float")    = CFloat
-      mapType' (ElemType "int")      = CInt
-      mapType' (ElemType x)          = CRawType x
-      mapType' _                     = error "Invalid type"
-  let genMicroInst idx _ _ (Store n x) _ | tmpPrefix `isPrefixOf` n = stack <>= [(n ++ show idx) @= formatNode x]
-                                         | otherwise = stack <>= [(mkIdent n (args !! 1) idx) @= formatNode x]
-      genMicroInst idx rng mmid mi mt =
-        let decl x = declScopedVariable Nothing (mapType' mt) (formatNode mmid) (Just x) >> return ()
-        in decl $ case mi of
-            (LoadCursorStatic d n) -> mkIdent n (args !! 0) (idx <> (toIdx . toList $ d + pure (toOffset rng)))
-            (LoadCursor d oid) -> tmpName oid ++ show (idx <> (toIdx . toList $ d + pure (toOffset rng - (toOffset $ rangeTable M.! oid))))
-            (Imm r) -> show (realToFrac r :: Double)
-            (Uniop op a) | "external-call" `isPrefixOf` op -> (fromJust $ stripPrefix "external-call/" op) ++ "(" ++ formatNode a ++ ")"
-                         | otherwise -> op ++ formatNode a
-            (Binop op a b) | op == "**" -> "pow(" ++ formatNode a ++ "," ++ formatNode b ++ ")"
-                           | otherwise -> formatNode a ++ op ++ formatNode b
-            (Triop _ a b c) -> formatNode a ++ "?" ++ formatNode b ++ ":" ++ formatNode c
-            LoadIndex i -> (fromIdx idx) !! i ++ "+n.offset_" ++ (axes !! i) ++ "+block_offset_" ++ show (i+1)
-            -- Naryop は廃止かもなので、実装を待つ
-            -- Naryop op xs -> undefined
-            x -> error $ "Unimplemented for keyword: " ++ show x
-  let genMMInst :: MMRange -> MMInstruction -> BuildM ()
-      genMMInst rng mm = loop [s'- toSize rng | s' <- inputSize] $ \idx -> sequence_ [genMicroInst idx rng mmid mi mt | (mmid, Node mi mt _) <- M.toAscList mm]
-  sequence_ [genMMInst (rangeTable M.! omid) mm | (omid, Node mm _ _) <- M.toAscList mmg']
+genKernel :: [CVariable] -> (String -> Bool) -> [Int] -> (Int, MMNode) -> BuildM ()
+genKernel args isTmp inputSize (s, Node mm _ _) =
+  loop [s'-2*s | s' <- inputSize] $ \idx -> sequence_ [genMicroInst args idx s mmid mi mt isTmp | (mmid, Node mi mt _) <- M.toAscList mm]
+
+genMicroInst :: [CVariable] -> Idx -> Int -> MMNodeID -> MicroInstruction -> MicroNodeType -> (String -> Bool) -> BuildM ()
+genMicroInst args idx _ _ (Store n x) _ isTmp | isTmp n = stack <>= [(n ++ show idx) @= formatNode x]
+                                              | otherwise = stack <>= [(mkIdent n (args !! 1) idx) @= formatNode x]
+genMicroInst args idx s mmid mi mt _ = do
+  axes <- view (globalEnvironment . axesNames)
+  let decl x = declScopedVariable Nothing (mapType mt) (formatNode mmid) (Just x) >> return ()
+  decl $ case mi of
+    (LoadCursorStatic d n) -> mkIdent n (args !! 0) (idx <> (toIdx . toList $ d + pure s))
+    -- (LoadCursor d oid) -> tmpName oid ++ show (idx <> (toIdx . toList $ d + pure (s-(sizeTable M.! oid))))
+    (Imm r) -> show (realToFrac r :: Double)
+    (Uniop op a) | "external-call" `isPrefixOf` op -> (fromJust $ stripPrefix "external-call/" op) ++ "(" ++ formatNode a ++ ")"
+                 | otherwise -> op ++ formatNode a
+    (Binop op a b) | op == "**" -> "pow(" ++ formatNode a ++ "," ++ formatNode b ++ ")"
+                   | otherwise -> formatNode a ++ op ++ formatNode b
+    (Triop _ a b c) -> formatNode a ++ "?" ++ formatNode b ++ ":" ++ formatNode c
+    LoadIndex i -> (fromIdx idx) !! i ++ "+n.offset_" ++ (axes !! i) ++ "+block_offset_" ++ show (i+1)
+    -- Naryop は廃止かもなので、実装を待つ
+    -- Naryop op xs -> undefined
+    x -> error $ "Unimplemented for keyword: " ++ show x
+  where
+    mapType :: MicroNodeType -> CType
+    mapType (ElemType "Rational") = CDouble
+    mapType (ElemType "void") = CVoid
+    mapType (ElemType "double") = CDouble
+    mapType (ElemType "float") = CFloat
+    mapType (ElemType "int") = CInt
+    mapType (ElemType x) = CRawType x
+    mapType _ = error "Invalid type"
+
+formatNode :: Show a => a -> String
+formatNode i = "a" ++ show i
