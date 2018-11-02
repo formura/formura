@@ -124,9 +124,15 @@ mergeMMNodes = foldl' (\(Node mm0 t a) (_,Node mm1 _ _) -> Node (mergeMMInstruct
 -- m0 に m1 の各ノードを追加していく
 -- このとき、同じノードがm0に存在していれば、m1にあるキーを書き換える
 mergeMMInstruction :: MMInstruction -> MMInstruction -> MMInstruction
-mergeMMInstruction m0 m1 = worker m0 $ M.toAscList m1
+mergeMMInstruction m0 m1 = worker m0 $ [(i+offset,updateKey offset n) | (i,n) <- M.toAscList m1]
   where
     offset = maximum' $ M.keys m0
+    updateKey x n = case n ^. nodeInst of
+                      Uniop op k -> n & nodeInst .~ Uniop op (k+x)
+                      Binop op k1 k2 -> n & nodeInst .~ Binop op (k1+x) (k2+x)
+                      Triop op k1 k2 k3 -> n & nodeInst .~ Triop op (k1+x) (k2+x) (k3+x)
+                      Store v k -> n & nodeInst .~ Store v (k+x)
+                      _ -> n
     exist t m = let m' = M.filter (==t) m in if null m' then Nothing else Just (head $ M.keys m')
     fixKey old new n = case n ^. nodeInst of 
                          Uniop op k | k == old -> n & nodeInst .~ Uniop op new
@@ -144,7 +150,7 @@ mergeMMInstruction m0 m1 = worker m0 $ M.toAscList m1
                          _ -> n
     worker m [] = m
     worker m ((mid,inst):ms) = case exist inst m of
-                                 Nothing -> let mid' = mid + offset in worker (M.insert mid' inst m) $ map (\(i,n) -> (i, fixKey mid mid' n)) ms
+                                 Nothing -> worker (M.insert mid inst m) ms
                                  Just k -> worker m (map (\(i,n) -> (i, fixKey mid k n)) ms)
 
 -- LoadCursor を LoadCursorStatic に変更する
