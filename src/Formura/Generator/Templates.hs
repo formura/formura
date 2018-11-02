@@ -29,7 +29,7 @@ scaffold = do
   withMPI $ \_ -> addHeader "<mpi.h>"
   withOMP $ addHeader "<omp.h>"
 
-  ic <- view (omGlobalEnvironment . envNumericalConfig)
+  ic <- view (globalEnvironment . envNumericalConfig)
   let gridPerNode = ic ^. icGridPerNode
   defineParam "Ns" (show $ ic ^. icSleeve)
   sequence_ [defineParam ("L" ++ show @Int i) (show v) | (i,v) <- zip [1..] gridPerNode]
@@ -52,9 +52,9 @@ scaffold = do
 
 defGlobalData :: BuildM ()
 defGlobalData = do
-  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
-  typeName <- view (omGlobalEnvironment . gridStructTypeName)
-  insntaceName <- view (omGlobalEnvironment . gridStructInstanceName)
+  gridPerNode <- view (globalEnvironment . envNumericalConfig . icGridPerNode)
+  typeName <- view (globalEnvironment . gridStructTypeName)
+  insntaceName <- view (globalEnvironment . gridStructInstanceName)
   gridStruct <- mkFields <$> view omStateSignature
   target .= gridStruct
   gridStructType <- defGlobalTypeStruct typeName gridStruct (SoA gridPerNode)
@@ -80,15 +80,15 @@ defNavi = do
 
 mkNavi :: BuildM [(String,CType,String)]
 mkNavi = do
-  dim <- view (omGlobalEnvironment . dimension)
-  axes <- view (omGlobalEnvironment . axesNames)
-  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
-  lengthPerNode <- view (omGlobalEnvironment . envNumericalConfig . icLengthPerNode)
-  spaceIntervals <- view (omGlobalEnvironment . envNumericalConfig . icSpaceInterval)
-  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  dim <- view (globalEnvironment . dimension)
+  axes <- view (globalEnvironment . axesNames)
+  gridPerNode <- view (globalEnvironment . envNumericalConfig . icGridPerNode)
+  lengthPerNode <- view (globalEnvironment . envNumericalConfig . icLengthPerNode)
+  spaceIntervals <- view (globalEnvironment . envNumericalConfig . icSpaceInterval)
+  mmpiShape <- view (globalEnvironment . envNumericalConfig . icMPIShape)
   fs <- case mmpiShape of
           Just mpiShape -> do
-            bases <- view (omGlobalEnvironment . commBases)
+            bases <- view (globalEnvironment . commBases)
             let rs = bases ++ [map negate b | b <- bases]
                 ranksTable = [(formatRank r,rank2arg r) | r <- rs ]
             return $ [ ("my_rank",CInt,"rank")
@@ -126,7 +126,7 @@ defLocalBuffs :: BlockingType -> BuildM ()
 defLocalBuffs NoBlocking = do
   gridStruct <- use target
   s <- maximum <$> getSleeves
-  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
+  gridPerNode <- view (globalEnvironment . envNumericalConfig . icGridPerNode)
   buffType <- defLocalTypeStruct "Formura_Buff" gridStruct (SoA $ map (+ (2*s)) gridPerNode)
   buff <- declLocalVariable (Just "static") buffType "buff" Nothing
   globalData <- getGlobalData
@@ -139,8 +139,8 @@ defLocalBuffs NoBlocking = do
     addVariable "filter_input" buff
     addVariable "filter_output" globalData
 defLocalBuffs (TemporalBlocking gridPerBlock blockPerNode nt) = do
-  s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
-  dim <- view (omGlobalEnvironment . dimension)
+  s <- view (globalEnvironment . envNumericalConfig . icSleeve)
+  dim <- view (globalEnvironment . dimension)
   gridStruct <- use target
   buffType <- defLocalTypeStruct "Formura_Buff" gridStruct (SoA $ map (+ (2*s)) gridPerBlock)
   rsltType <- defLocalTypeStruct "Formura_Rslt" gridStruct (SoA gridPerBlock)
@@ -148,7 +148,7 @@ defLocalBuffs (TemporalBlocking gridPerBlock blockPerNode nt) = do
   rslt <- declLocalVariable (Just "static") rsltType "rslt" Nothing
   -- 床の準備
   ms <- maximum <$> getSleeves
-  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
+  gridPerNode <- view (globalEnvironment . envNumericalConfig . icGridPerNode)
   tmpFloorType <- defLocalTypeStruct "Formura_Tmp_Floor" gridStruct (SoA $ map (+ (2*ms)) gridPerNode)
   tmpFloor <- declLocalVariable (Just "static") tmpFloorType "tmp_floor" Nothing
   -- 壁の準備
@@ -173,8 +173,8 @@ defLocalBuffs (TemporalBlocking gridPerBlock blockPerNode nt) = do
 
 defCommBuffs :: BuildM ()
 defCommBuffs = do
-  bases <- view (omGlobalEnvironment . commBases)
-  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
+  bases <- view (globalEnvironment . commBases)
+  gridPerNode <- view (globalEnvironment . envNumericalConfig . icGridPerNode)
   gridStruct <- use target
   commType <- defLocalTypeStruct "Formura_Comm_Buff" gridStruct Normal
   sleeves <- getSleeves
@@ -188,7 +188,7 @@ defCommBuffs = do
 defUtilFunctions :: BuildM ()
 defUtilFunctions = do
   withMPI $ \mpiShape -> do
-    dim <- view (omGlobalEnvironment . dimension)
+    dim <- view (globalEnvironment . dimension)
     let encodeRankArg = [(CInt, "p" ++ show i) | i <- [1..dim]]
     let decodeRankArg = (CInt,"p"):[(CPtr CInt, "p" ++ show i) | i <- [1..dim]]
     defLocalFunction "Formura_Encode_rank" encodeRankArg CInt $ \_ -> case dim of
@@ -218,7 +218,7 @@ defUtilFunctions = do
         statement $ printf "*p3 = (int)p/%d" (m1*m2)
       _ -> error "No support"
 
-  axes <- view (omGlobalEnvironment . axesNames)
+  axes <- view (globalEnvironment . axesNames)
   let toPosBody a =
         statement $ printf "return n.space_interval_%s*((i+n.offset_%s)%%n.total_grid_%s)" a a a
   for_ axes $ \a ->
@@ -232,7 +232,7 @@ defFormuraInit navi = do
   where
     initBody :: [(String,String)] -> String -> BuildM ()
     initBody fs comm = do
-      dim <- view (omGlobalEnvironment . dimension)
+      dim <- view (globalEnvironment . dimension)
       withMPI $ \mpiShape -> do
         when (comm == "MPI_COMM_WORLD") $ call "MPI_Init" ["argc","argv"]
         declScopedVariable Nothing (CRawType "MPI_Comm") "cm" (Just comm)
@@ -254,7 +254,7 @@ defFormuraFirstStep g = do
   blockOffset <- getBlockOffsets
   buff <- getVariable "first_input"
   rslt <- getVariable "first_output"
-  s <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icSleeve0)
+  s <- fromJust <$> view (globalEnvironment . envNumericalConfig . icSleeve0)
   defLocalFunction "Formura_First_Step_Kernel" ([(CPtr $ variableType buff, "buff"), (CPtr $ variableType rslt, "rslt"),(CRawType "Formura_Navi", "n")] ++ blockOffset) CVoid (mkKernel g s)
   defLocalFunction "Formura_First_Step" [(CRawType "Formura_Navi *", "n")] CVoid $ \_ ->
       noBlocking buff rslt s "Formura_First_Step_Kernel"
@@ -264,7 +264,7 @@ defFormuraFilter g = do
   blockOffset <- getBlockOffsets
   buff <- getVariable "filter_input"
   rslt <- getVariable "filter_output"
-  s <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icFilterSleeve)
+  s <- fromJust <$> view (globalEnvironment . envNumericalConfig . icFilterSleeve)
   defLocalFunction "Formura_Filter_Kernel" ([(CPtr $ variableType buff, "buff"), (CPtr $ variableType rslt, "rslt"),(CRawType "Formura_Navi", "n")] ++ blockOffset) CVoid (mkKernel g s)
   defLocalFunction "Formura_Filter" [(CRawType "Formura_Navi *", "n")] CVoid $ \_ ->
       noBlocking buff rslt s "Formura_Filter_Kernel"
@@ -288,29 +288,29 @@ defFormuraStep = do
   where
     stepBody :: [CVariable] -> BuildM ()
     stepBody args = do
-      s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
+      s <- view (globalEnvironment . envNumericalConfig . icSleeve)
       mmg <- view omStepGraph
       mkKernel mmg s args
 
 defFormuraForward :: BuildM ()
 defFormuraForward = do
-  blockingType <- view (omGlobalEnvironment . envNumericalConfig . icBlockingType)
+  blockingType <- view (globalEnvironment . envNumericalConfig . icBlockingType)
   defGlobalFunction "Formura_Forward" [(CRawType "Formura_Navi *", "n")] CVoid (\_ -> forwardBody blockingType)
   where
     forwardBody NoBlocking = do
       buff <- getVariable "step_input"
       rslt <- getVariable "step_output"
-      s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
+      s <- view (globalEnvironment . envNumericalConfig . icSleeve)
       noBlocking buff rslt s "Formura_Step"
       withFilter $ \_ -> do
-        filterInterval <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icFilterInterval)
+        filterInterval <- fromJust <$> view (globalEnvironment . envNumericalConfig . icFilterInterval)
         raw $ printf "if (n->time_step %% %d == 0) {" filterInterval
         call "Formura_Filter" ["n"]
         raw $ "}"
       statement "n->time_step += 1"
     forwardBody (TemporalBlocking gridPerBlock blockPerNode nt) = do
-      s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
-      dim <- view (omGlobalEnvironment . dimension)
+      s <- view (globalEnvironment . envNumericalConfig . icSleeve)
+      dim <- view (globalEnvironment . dimension)
       globalData <- getGlobalData
       tmpFloor <- getVariable "tmp_floor"
       copy globalData tmpFloor empty (repeat (2*s*nt))
@@ -327,7 +327,7 @@ defFormuraForward = do
       axes <- view (omGlobalEnvironment . axesNames)
       for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a (s*nt) a a
       withFilter $ \_ -> do
-        filterInterval <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icFilterInterval)
+        filterInterval <- fromJust <$> view (globalEnvironment . envNumericalConfig . icFilterInterval)
         raw $ printf "if (n->time_step %% %d == 0) {" filterInterval
         call "Formura_Filter" ["n"]
         raw $ "}"
@@ -336,8 +336,8 @@ defFormuraForward = do
 noBlocking :: CVariable -> CVariable -> Int -> String -> BuildM ()
 noBlocking buff rslt s kernelName = do
   globalData <- getGlobalData
-  axes <- view (omGlobalEnvironment . axesNames)
-  dim <- view (omGlobalEnvironment . dimension)
+  axes <- view (globalEnvironment . axesNames)
+  dim <- view (globalEnvironment . dimension)
   -- 通信
   sendrecv globalData buff s
   copy globalData buff empty (repeat $ 2*s)

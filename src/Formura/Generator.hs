@@ -18,7 +18,7 @@ import Formura.OrthotopeMachine.Graph
 
 genCode :: WithCommandLineOption => MMProgram -> IO ()
 genCode mm = do
-  let ic = mm ^. omGlobalEnvironment . envNumericalConfig
+  let ic = mm ^. globalEnvironment . envNumericalConfig
   let totalMPI = product <$> ic ^. icMPIShape
 
   let cs = genCodeStructure mm scaffold

@@ -19,14 +19,14 @@ import Formura.Generator.Types
 
 withMPI :: ([Int] -> BuildM ()) -> BuildM ()
 withMPI f = do
-  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  mmpiShape <- view (globalEnvironment . envNumericalConfig . icMPIShape)
   case mmpiShape of
     Nothing -> return ()
     Just mpiShape -> f mpiShape
 
 withOMP :: BuildM () -> BuildM ()
 withOMP f = do
-  omp <- view (omGlobalEnvironment . envNumericalConfig . icWithOmp)
+  omp <- view (globalEnvironment . envNumericalConfig . icWithOmp)
   when (omp > 0) $ f
 
 withFirstStep :: (MMGraph -> BuildM ()) -> BuildM ()
@@ -45,15 +45,15 @@ withFilter f = do
 
 getBlockOffsets :: BuildM [(CType,String)]
 getBlockOffsets = do
-  dim <- view (omGlobalEnvironment . dimension)
+  dim <- view (globalEnvironment . dimension)
   return [(CInt, "block_offset_" ++ show i) | i <- [1..dim]]
 
 getSleeves :: BuildM [Int]
 getSleeves = do
-  step <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
-  first <- maybeToList <$> view (omGlobalEnvironment . envNumericalConfig . icSleeve0)
-  filter' <- maybeToList <$> view (omGlobalEnvironment . envNumericalConfig . icFilterSleeve)
-  bt <- view (omGlobalEnvironment . envNumericalConfig . icBlockingType)
+  step <- view (globalEnvironment . envNumericalConfig . icSleeve)
+  first <- maybeToList <$> view (globalEnvironment . envNumericalConfig . icSleeve0)
+  filter' <- maybeToList <$> view (globalEnvironment . envNumericalConfig . icFilterSleeve)
+  bt <- view (globalEnvironment . envNumericalConfig . icBlockingType)
   let s = case bt of
            NoBlocking -> [step]
            TemporalBlocking _ _ nt -> [step*nt]
@@ -88,7 +88,7 @@ getVariable k = do
 
 getGlobalData :: BuildM CVariable
 getGlobalData = do
-  insntaceName <- view (omGlobalEnvironment . gridStructInstanceName)
+  insntaceName <- view (globalEnvironment . gridStructInstanceName)
   getVariable insntaceName
 
 addHeader :: String -> BuildM ()
@@ -269,9 +269,9 @@ sendrecv src tgt s = do
 
 isendrecv :: CVariable -> Int -> BuildM ([CVariable],[CVariable],[CVariable])
 isendrecv src s = do
-  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
-  bases <- view (omGlobalEnvironment . commBases)
-  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
+  mmpiShape <- view (globalEnvironment . envNumericalConfig . icMPIShape)
+  bases <- view (globalEnvironment . commBases)
+  gridPerNode <- view (globalEnvironment . envNumericalConfig . icGridPerNode)
   fmap unzip3 $ for bases $ \b -> do
     sendbuf <- getSendBuf s b
     recvbuf <- getRecvBuf s b
@@ -283,7 +283,7 @@ isendrecv src s = do
 
 waitAndCopy :: ([CVariable],[CVariable],[CVariable]) -> CVariable -> Int -> BuildM ()
 waitAndCopy (sendReqs,recvReqs,recvBufs) tgt s = do
-  bases <- view (omGlobalEnvironment . commBases)
+  bases <- view (globalEnvironment . commBases)
   withMPI $ \_ -> do
     mapM_ wait sendReqs
     mapM_ wait recvReqs
