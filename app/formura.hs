@@ -91,8 +91,21 @@ codegen sugarcoated_prog = do
     mapM_ pprMMNode $ M.toList (mmProg ^. omStepGraph)
     putStrLn ""
 
-  putStrLn "Generating code..."
   let irProg = genIRProgram mmProg
+  when (?commandLineOption ^. verbose) $ do
+    putStrLn "## Debug print: simulation state"
+    print (irProg ^. irStateSignature)
+    putStrLn ""
+
+    putStrLn "## Debug print: manifested init graph"
+    print (irProg ^. irInitGraph)
+    putStrLn ""
+
+    putStrLn "## Debug print: manifested step graph"
+    print (irProg ^. irStepGraph)
+    putStrLn ""
+
+  putStrLn "Generating code..."
   genCode irProg
 
 pprNode :: (OMNodeID, OMNode) -> IO ()
