@@ -126,7 +126,7 @@ mergeMMNodes = foldl' (\(Node mm0 t a) (_,Node mm1 _ _) -> Node (mergeMMInstruct
 mergeMMInstruction :: MMInstruction -> MMInstruction -> MMInstruction
 mergeMMInstruction m0 m1 = worker m0 $ [(i+offset,updateKey offset n) | (i,n) <- M.toAscList m1]
   where
-    offset = maximum' $ M.keys m0
+    offset = 1 + (maximum' $ M.keys m0)
     updateKey x n = case n ^. nodeInst of
                       Uniop op k -> n & nodeInst .~ Uniop op (k+x)
                       Binop op k1 k2 -> n & nodeInst .~ Binop op (k1+x) (k2+x)
@@ -136,9 +136,11 @@ mergeMMInstruction m0 m1 = worker m0 $ [(i+offset,updateKey offset n) | (i,n) <-
     exist t m = let m' = M.filter (==t) m in if null m' then Nothing else Just (head $ M.keys m')
     fixKey old new n = case n ^. nodeInst of 
                          Uniop op k | k == old -> n & nodeInst .~ Uniop op new
+                                    | otherwise -> n
                          Binop op k1 k2 | k1 == old && k2 == old -> n & nodeInst .~ Binop op new new
                                         | k1 == old -> n & nodeInst .~ Binop op new k2
                                         | k2 == old -> n & nodeInst .~ Binop op k1 new
+                                        | otherwise -> n
                          Triop op k1 k2 k3 | (k1,k2,k3) == (old,old,old) -> n & nodeInst .~ Triop op new new new
                                            | (k1,k2) == (old,old) -> n & nodeInst .~ Triop op new new k3
                                            | (k2,k3) == (old,old) -> n & nodeInst .~ Triop op k1 new new
@@ -146,7 +148,9 @@ mergeMMInstruction m0 m1 = worker m0 $ [(i+offset,updateKey offset n) | (i,n) <-
                                            | k1 == old -> n & nodeInst .~ Triop op new k2 k3
                                            | k2 == old -> n & nodeInst .~ Triop op k1 new k3
                                            | k3 == old -> n & nodeInst .~ Triop op k1 k2 new
+                                           | otherwise -> n
                          Store v k | k == old -> n & nodeInst .~ Store v new
+                                   | otherwise -> n
                          _ -> n
     worker m [] = m
     worker m ((mid,inst):ms) = case exist inst m of
