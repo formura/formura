@@ -6,6 +6,7 @@ import           Control.Exception
 import           Control.Lens
 import           Control.Monad
 import qualified Data.Map as M
+import Data.Time
 import           System.IO
 import           System.Exit
 import qualified Text.PrettyPrint.ANSI.Leijen as Ppr
@@ -24,9 +25,15 @@ import           Formura.OrthotopeMachine.Translate (genOMProgram)
 import qualified Formura.Parser as P
 import           Formura.Syntax
 
+bench :: String -> IO ()
+bench msg = do
+  t <- getCurrentTime
+  putStrLn $ msg ++ " (" ++ formatTime defaultTimeLocale "%T" t ++ ")"
+
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
+  bench "start"
   opts <- getCommandLineOption
   let ?commandLineOption = opts
 
@@ -35,6 +42,7 @@ main = do
 
 process :: WithCommandLineOption => FilePath -> IO ()
 process fn = do
+  bench "process"
   nc <- readConfig ncFilePath
           `catches` [Handler (\(_ :: IOException) -> die $ "Error: Unable to read " ++ ncFilePath)
                     ,Handler (\(e :: ConfigException) -> die $ "Error: " ++ displayException e)
@@ -49,6 +57,7 @@ process fn = do
 
 codegen :: WithCommandLineOption => Program -> IO ()
 codegen sugarcoated_prog = do
+  bench "codegen"
   prog <- desugar sugarcoated_prog
   when (?commandLineOption ^. verbose) $ do
     putStrLn "## AST"
@@ -58,6 +67,7 @@ codegen sugarcoated_prog = do
     print prog
     putStrLn ""
 
+  bench "genOMProgram"
   omProg <- genOMProgram prog
 
   when (?commandLineOption ^. verbose) $ do
@@ -77,6 +87,7 @@ codegen sugarcoated_prog = do
     print (omProg ^. omGlobalEnvironment)
     putStrLn ""
 
+  bench "genMMProgram"
   mmProg <- genMMProgram omProg
   when (?commandLineOption ^. verbose) $ do
     putStrLn "## Debug print: simulation state"
@@ -91,6 +102,7 @@ codegen sugarcoated_prog = do
     mapM_ pprMMNode $ M.toList (mmProg ^. omStepGraph)
     putStrLn ""
 
+  bench "genIRProgram"
   let irProg = genIRProgram mmProg
   when (?commandLineOption ^. verbose) $ do
     putStrLn "## Debug print: simulation state"
@@ -105,8 +117,10 @@ codegen sugarcoated_prog = do
     print (irProg ^. irStepGraph)
     putStrLn ""
 
+  bench "genCode"
   putStrLn "Generating code..."
   genCode irProg
+  bench "Done"
 
 pprNode :: (OMNodeID, OMNode) -> IO ()
 pprNode (i,n) = do
