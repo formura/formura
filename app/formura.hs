@@ -47,7 +47,7 @@ process fn = do
           `catches` [Handler (\(_ :: IOException) -> die $ "Error: Unable to read " ++ ncFilePath)
                     ,Handler (\(e :: ConfigException) -> die $ "Error: " ++ displayException e)
                     ]
-  mprog <- P.parseFromFileEx (P.runP $ P.program nc <* P.eof) fn
+  mprog <- {-# SCC "parse:" #-} P.parseFromFileEx (P.runP $ P.program nc <* P.eof) fn
   case mprog of
     P.Failure err -> do
       Ppr.displayIO stderr $ Ppr.renderPretty 0.8 80 $ P._errDoc err <> Ppr.linebreak
@@ -68,7 +68,7 @@ codegen sugarcoated_prog = do
     putStrLn ""
 
   bench "genOMProgram"
-  omProg <- genOMProgram prog
+  omProg <- {-# SCC "genOMProgram:" #-} genOMProgram prog
 
   when (?commandLineOption ^. verbose) $ do
     putStrLn "## Debug print: simulation state"
@@ -88,7 +88,7 @@ codegen sugarcoated_prog = do
     putStrLn ""
 
   bench "genMMProgram"
-  mmProg <- genMMProgram omProg
+  mmProg <- {-# SCC "genMMProgram:" #-} genMMProgram omProg
   when (?commandLineOption ^. verbose) $ do
     putStrLn "## Debug print: simulation state"
     print (mmProg ^. omStateSignature)
@@ -103,7 +103,7 @@ codegen sugarcoated_prog = do
     putStrLn ""
 
   bench "genIRProgram"
-  let irProg = genIRProgram mmProg
+  let irProg = {-# SCC "genIRProgram:" #-} genIRProgram mmProg
   when (?commandLineOption ^. verbose) $ do
     putStrLn "## Debug print: simulation state"
     print (irProg ^. irStateSignature)
