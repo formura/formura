@@ -29,6 +29,7 @@ data NumericalConfig = NumericalConfig
   , _ncFilterInterval :: Maybe Int
   , _ncMPIShape :: Maybe (Vec Int)
   , _ncWithOmp :: Maybe Int
+  , _ncWithProf :: Maybe Bool
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
 
 makeClassy ''NumericalConfig
@@ -90,6 +91,7 @@ data InternalConfig = InternalConfig
   , _icFilterInterval :: Maybe Int
   , _icMPIShape :: Maybe [Int]
   , _icWithOmp :: Int
+  , _icWithProf :: Bool
   } deriving (Eq, Ord, Read, Show, Typeable, Data)
 
 makeClassy ''InternalConfig
@@ -106,6 +108,7 @@ defaultInternalConfig = InternalConfig
   , _icFilterInterval = Nothing
   , _icMPIShape = Nothing
   , _icWithOmp = 0
+  , _icWithProf = False
   }
 
 convertConfig :: Int -> Maybe Int -> Maybe Int -> NumericalConfig -> Either ConfigException InternalConfig
@@ -132,6 +135,7 @@ convertConfig s s0 sf nc = check ic
           , _icFilterInterval = nc ^. ncFilterInterval
           , _icMPIShape = toList <$> nc ^. ncMPIShape
           , _icWithOmp = fromMaybe 0 $ nc ^. ncWithOmp
+          , _icWithProf = fromMaybe False $ nc ^. ncWithProf
           }
     -- 値が制約を満たすか確認
     check :: InternalConfig -> Either ConfigException InternalConfig

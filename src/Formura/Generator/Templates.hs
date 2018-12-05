@@ -27,6 +27,12 @@ scaffold = do
   withMPI $ \_ -> addHeader "<mpi.h>"
   withOMP $ addHeader "<omp.h>"
 
+  withProf $ do
+    addHeader "<sys/time.h>"
+    profType <- defGlobalTypeStruct "Formura_Prof" [("kernel_time", CDouble),("total_time",CDouble),("call_count",CInt)] Normal
+    declLocalVariable (Just "static") profType "formura_prof" Nothing
+    defProfFunctions
+
   ic <- view (omGlobalEnvironment . envNumericalConfig)
   let gridPerNode = ic ^. icGridPerNode
   defineParam "Ns" (show $ ic ^. icSleeve)
@@ -183,6 +189,34 @@ defCommBuffs = do
       declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("send_buf" ++ show s ++ "_" ++ r) Nothing
       declLocalVariable (Just "static") (CArray [if d == 1 then 2*s else n | (d,n) <- zip b gridPerNode] commType) ("recv_buf" ++ show s ++ "_" ++ r') Nothing
 
+defProfFunctions :: BuildM ()
+defProfFunctions = do
+  prof <- getVariable "formura_prof"
+  let setP f op v = statement $ (variableName prof) ++ "." ++ f ++ op ++ "=" ++ v
+      getNow = declScopedVariable Nothing CDouble "now" (Just "get_time()")
+  defGlobalFunction "Formura_Get_Prof" [] (CPtr $ variableType prof) $ \_ -> do
+    statement $ "return " ++ ref prof
+  defLocalFunction "get_time" [] CDouble $ \_ -> do
+    statement "struct timeval tv"
+    call "gettimeofday" ["&tv", "NULL"]
+    statement "return tv.tv_sec + 1.e-6*tv.tv_usec"
+  defLocalFunction "start_prof" [] CVoid $ \_ -> do
+    now <- getNow
+    setP "call_count" "" "0"
+    setP "kernel_time" "" "0.0"
+    setP "total_time" "-" (variableName now)
+  defLocalFunction "start_kernel" [] CVoid $ \_ -> do
+    now <- getNow
+    setP "kernel_time" "-" (variableName now)
+  defLocalFunction "end_kernel" [] CVoid $ \_ -> do
+    now <- getNow
+    setP "kernel_time" "+" (variableName now)
+    setP "call_count" "+" "1"
+  defLocalFunction "end_prof" [] CVoid $ \_ -> do
+    now <- getNow
+    setP "total_time" "+" (variableName now)
+
+
 defUtilFunctions :: BuildM ()
 defUtilFunctions = do
   withMPI $ \mpiShape -> do
@@ -231,6 +265,7 @@ defFormuraInit navi = do
     initBody :: [(String,String)] -> String -> BuildM ()
     initBody fs comm = do
       dim <- view (omGlobalEnvironment . dimension)
+      withProf $ call "start_prof" []
       withMPI $ \mpiShape -> do
         when (comm == "MPI_COMM_WORLD") $ call "MPI_Init" ["argc","argv"]
         declScopedVariable Nothing (CRawType "MPI_Comm") "cm" (Just comm)
@@ -338,7 +373,9 @@ noBlocking buff rslt s kernelName = do
   sendrecv globalData buff s
   copy globalData buff empty (repeat $ 2*s)
   -- 1ステップ更新
+  withProf $ when (kernelName == "Formura_Step") $ call "start_kernel" []
   call kernelName ([ref buff, ref rslt, "*n"] ++ replicate dim "0")
+  withProf $ when (kernelName == "Formura_Step") $ call "end_kernel" []
   for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a s a a
 
 updateWithTB :: [Int] -> [Int] -> Int -> [(Int,Int)] -> BuildM ()
@@ -367,7 +404,9 @@ updateWithTB gridPerBlock blockPerNode nt boundary = loopWith [("j" ++ show @Int
         stack <>= [mkIdent f buff (idx' <> toIdx [if b then n else 0 | (b,n) <- zip flag gridPerBlock]) @= mkIdent f tmpWall (idx0 >< idx') | f <- (getFields tmpWall), f `elem` (getFields buff)]
       return ()
 --   - 1段更新
+    withProf $ call "start_kernel" []
     call "Formura_Step" ([ref buff, ref rslt,"*n"] ++ fromIdx floorOffset)
+    withProf $ call "end_kernel" []
     for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a s a a
 --   - 壁の書き出し
     for_ tmpWalls $ \(flag, gs, tmpWall) -> do
@@ -380,8 +419,9 @@ updateWithTB gridPerBlock blockPerNode nt boundary = loopWith [("j" ++ show @Int
 
 defFormuraFinalize :: BuildM ()
 defFormuraFinalize =
-  defGlobalFunction "Formura_Finalize" [] CVoid $ \_ ->
+  defGlobalFunction "Formura_Finalize" [] CVoid $ \_ -> do
     withMPI $ \_ -> call "MPI_Finalize" []
+    withProf $ call "end_prof" []
 
 -- Manifestノードの配列サイズを計算する
 -- もとの配列サイズ NX+2Ns に比べてどれだけ小さいかを求める
