@@ -1,21 +1,21 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies     #-}
 module Formura.Generator.Templates where
 
-import Control.Lens hiding (op)
-import Control.Monad
-import Data.Foldable (toList, for_)
-import Data.List
+import           Control.Lens hiding (op)
+import           Control.Monad
+import           Data.Foldable (for_, toList)
+import           Data.List
 import qualified Data.Map as M
-import Data.Maybe (fromJust)
-import Text.Printf
+import           Data.Maybe (fromJust)
+import           Text.Printf
 
+import Formura.Generator.Functions
+import Formura.Generator.Types
+import Formura.GlobalEnvironment
 import Formura.NumericalConfig
 import Formura.OrthotopeMachine.Graph
-import Formura.GlobalEnvironment
-import Formura.Generator.Types
-import Formura.Generator.Functions
 import Formura.Syntax
 
 scaffold :: BuildM ()
@@ -37,7 +37,7 @@ scaffold = do
   navi <- defNavi
   defLocalBuffs (ic ^. icBlockingType)
   defCommBuffs
-  
+
   defUtilFunctions
 
   defFormuraSetup
@@ -322,6 +322,8 @@ defFormuraForward = do
       waitAndCopy rs tmpFloor (s*nt)
       mapM_ update bs
       copy tmpFloor globalData empty empty
+      axes <- view (omGlobalEnvironment . axesNames)
+      for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a (s*nt) a a
       withFilter $ \_ -> do
         filterInterval <- fromJust <$> view (omGlobalEnvironment . envNumericalConfig . icFilterInterval)
         raw $ printf "if (n->time_step %% %d == 0) {" filterInterval
@@ -368,7 +370,6 @@ updateWithTB gridPerBlock blockPerNode nt boundary = loopWith [("j" ++ show @Int
       return ()
 --   - 1段更新
     call "Formura_Step" ([ref buff, ref rslt,"*n"] ++ fromIdx floorOffset)
-    for_ axes $ \a -> statement $ printf "n->offset_%s = (n->offset_%s - %d + n->total_grid_%s)%%n->total_grid_%s" a a s a a
 --   - 壁の書き出し
     for_ tmpWalls $ \(flag, gs, tmpWall) -> do
       let idx0 = (toIdx [i | (i,b) <- zip (fromIdx idx) flag, not b]) >< it
@@ -397,7 +398,7 @@ calcSizes = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) a
             go _ acc = acc
 
             maximum' [] = 0
-            maximum' x = maximum x
+            maximum' x  = maximum x
 
 mkKernel :: MMGraph -> Int -> [CVariable] -> BuildM ()
 mkKernel mmg sleeve args = do
@@ -410,7 +411,7 @@ mkKernel mmg sleeve args = do
   -- 型が void なら最後に Store されているはずなので、中間変数を生成しない
   -- そうでないなら、最後に型に合う変数に結果を書き込む必要がある (最後に命令として Store がない)
   let isVoid (ElemType "void") = True
-      isVoid _ = False
+      isVoid _                 = False
 
       tmpPrefix = "formura_mn"
       tmpName oid = tmpPrefix ++ show oid
@@ -435,12 +436,12 @@ mkKernel mmg sleeve args = do
   let formatNode i = "a" ++ show i
       mapType' :: MicroNodeType -> CType
       mapType' (ElemType "Rational") = CDouble
-      mapType' (ElemType "void") = CVoid
-      mapType' (ElemType "double") = CDouble
-      mapType' (ElemType "float") = CFloat
-      mapType' (ElemType "int") = CInt
-      mapType' (ElemType x) = CRawType x
-      mapType' _ = error "Invalid type"
+      mapType' (ElemType "void")     = CVoid
+      mapType' (ElemType "double")   = CDouble
+      mapType' (ElemType "float")    = CFloat
+      mapType' (ElemType "int")      = CInt
+      mapType' (ElemType x)          = CRawType x
+      mapType' _                     = error "Invalid type"
   let genMicroInst idx _ _ (Store n x) _ | tmpPrefix `isPrefixOf` n = stack <>= [(n ++ show idx) @= formatNode x]
                                          | otherwise = stack <>= [(mkIdent n (args !! 1) idx) @= formatNode x]
       genMicroInst idx s mmid mi mt =
