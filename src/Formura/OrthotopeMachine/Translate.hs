@@ -17,7 +17,7 @@ import           Control.Applicative
 import           Control.Exception
 import           Control.Lens hiding (at, op)
 import           Control.Monad
-import "mtl"     Control.Monad.Reader hiding (fix)
+import           "mtl" Control.Monad.Reader hiding (fix)
 import           Data.Foldable
 import qualified Data.Map as M
 import           Data.Ratio
@@ -47,9 +47,9 @@ instance HasBinding Binding where
   binding = simple
 
 data CodegenState = CodegenState
-  { _codegenSyntacticState :: CompilerSyntacticState
+  { _codegenSyntacticState    :: CompilerSyntacticState
   , _codegenGlobalEnvironment :: GlobalEnvironment
-  , _theGraph :: OMGraph
+  , _theGraph                 :: OMGraph
   }
 
 makeClassy ''CodegenState
@@ -83,8 +83,8 @@ setupGlobalEnvironment prog = do
       defaultGridStructInstanceName = "formura_data"
   dim <- case concatMap findDimension spDecls of
     [n] -> return n
-    [] -> raiseErr $ failed "no dimension declaration found."
-    _  -> raiseErr $ failed "multiple dimension declaration found."
+    []  -> raiseErr $ failed "no dimension declaration found."
+    _   -> raiseErr $ failed "multiple dimension declaration found."
   axs <- case concatMap findAxesDeclaration spDecls of
     [xs] | length xs == dim -> return xs
     [_] -> raiseErr $ failed "number of declared axes does not match the declared dimension."
@@ -92,12 +92,12 @@ setupGlobalEnvironment prog = do
     _  -> raiseErr $ failed "multiple axes declaration found."
   gridType <- case concatMap findGridStructTypeNameDeclaration spDecls of
     [t] -> return (if null t then defaultGridStructTypeName else t)
-    [] -> return defaultGridStructTypeName
-    _ -> raiseErr $ failed "multiple grid_struct_type_name found."
+    []  -> return defaultGridStructTypeName
+    _   -> raiseErr $ failed "multiple grid_struct_type_name found."
   gridInstance <- case concatMap findGridStructInstanceNameDeclaration spDecls of
     [n] -> return (if null n then defaultGridStructInstanceName else n)
-    [] -> return defaultGridStructInstanceName
-    _ -> raiseErr $ failed "multiple grid_struct_instance_name found."
+    []  -> return defaultGridStructInstanceName
+    _   -> raiseErr $ failed "multiple grid_struct_instance_name found."
   dimension .= dim
   axesNames .= axs
   gridStructTypeName .= gridType
@@ -112,15 +112,15 @@ setupGlobalEnvironment prog = do
 
     findDimension :: SpecialDeclaration -> [Int]
     findDimension (DimensionDeclaration n) = [n]
-    findDimension _ = []
+    findDimension _                        = []
 
     findAxesDeclaration :: SpecialDeclaration -> [[IdentName]]
     findAxesDeclaration (AxesDeclaration xs) = [xs]
-    findAxesDeclaration _ = []
+    findAxesDeclaration _                    = []
 
     findGridStructTypeNameDeclaration :: SpecialDeclaration -> [IdentName]
     findGridStructTypeNameDeclaration (GridStructTypeNameDeclaration t) = [t]
-    findGridStructTypeNameDeclaration _ = []
+    findGridStructTypeNameDeclaration _                                 = []
 
     findGridStructInstanceNameDeclaration :: SpecialDeclaration -> [IdentName]
     findGridStructInstanceNameDeclaration (GridStructInstanceNameDeclaration n) = [n]
@@ -173,12 +173,12 @@ castVal t1 vx = let t0 = typeOfVal vx in case (t1, t0, vx) of
 
 instance Generatable ImmF where
   gen (Imm r) = insert (Imm r) (ElemType "Rational")
-  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
+  gen _       = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 spoonTExpr :: (TupleF ∈ fs) => TExpr (Lang fs) -> GenM (Lang fs)
 spoonTExpr x = case x ^? tExpr of
   Nothing -> raiseErr $ failed "Tuple length mismatch"
-  Just y -> return y
+  Just y  -> return y
 
 instance Generatable OperatorF where
   gen (Uniop op gA)       = do a <- gA                  ; goUniop op a
@@ -252,8 +252,8 @@ goBinop o a b  = raiseErr $ failed $ unlines ["unexpected path in binary operato
 
 isBoolishType :: OMNodeType -> Bool
 isBoolishType (ElemType "bool") = True
-isBoolishType (GridType _ x) = isBoolishType x
-isBoolishType _ = False
+isBoolishType (GridType _ x)    = isBoolishType x
+isBoolishType _                 = False
 
 goTriop :: IdentName -> ValueExpr -> ValueExpr -> ValueExpr -> GenM ValueExpr
 goTriop op (av :. at) (bv :. bt) (cv :. ct)
@@ -325,7 +325,7 @@ evalToImm x = do
     Imm r -> return $ Just r
     n :. _ -> case M.lookup n g of
       Just (Node (Imm r) _ _) -> return $ Just r
-      _ -> error "no match"
+      _                       -> error "no match"
     _ -> return Nothing
 
 goApply :: ValueExpr -> ValueExpr -> GenM ValueExpr
@@ -383,7 +383,7 @@ resolveLex (In meta fx) = do
 
 instance Generatable LetF where
   gen (Let b genX) = withBindings b genX
-  gen _ = error "no match (Formura.OrthotopeMachine.Translate.gen)"
+  gen _            = error "no match (Formura.OrthotopeMachine.Translate.gen)"
 
 namesOfLhs :: LExpr -> TupleOfIdents
 namesOfLhs (Ident n) = Ident n
@@ -591,9 +591,9 @@ lookupToplevelIdents fprog name0 =  case lup stmts of
     (Program _ (BindingF stmts) _) = fprog
 
     lup :: [StatementF RExpr] -> [RExpr]
-    lup [] = []
+    lup []                            = []
     lup (SubstF (Ident nam) rhs : xs) | nam == name0 = rhs : lup xs
-    lup (_:xs) = lup xs
+    lup (_:xs)                        = lup xs
 
 -- FIX ME
 lookupToplevelIdents' :: Program -> IdentName -> GenM (Maybe RExpr)
@@ -605,9 +605,9 @@ lookupToplevelIdents' fprog name0 =  case lup stmts of
     (Program _ (BindingF stmts) _) = fprog
 
     lup :: [StatementF RExpr] -> [RExpr]
-    lup [] = []
+    lup []                            = []
     lup (SubstF (Ident nam) rhs : xs) | nam == name0 = rhs : lup xs
-    lup (_:xs) = lup xs
+    lup (_:xs)                        = lup xs
 
 calcSleeve :: OMGraph -> Int
 calcSleeve g = maximum $ map traceNode $ findStore g
@@ -616,7 +616,7 @@ calcSleeve g = maximum $ map traceNode $ findStore g
     findStore = M.foldr getStore []
 
     getStore (Node (Store _ i) _ _) acc = i:acc
-    getStore _ acc = acc
+    getStore _ acc                      = acc
 
     traceNode :: OMNodeID -> Int
     traceNode i0 = maximum $ go i0 (pure 0)
@@ -632,7 +632,7 @@ calcSleeve g = maximum $ map traceNode $ findStore g
             Just (Node (Binop _ i1 i2) _ _) -> go i1 s `max` go i2 s
             Just (Node (Triop _ i1 i2 i3) _ _) -> maximum [go i1 s,go i2 s,go i3 s]
             Just (Node (Naryop _ is) _ _) -> maximum [go i' s | i' <- is]
-            Just (Node (Shift d i') _ _) -> go i' (s + abs d)
+            Just (Node (Shift d i') _ _) -> go i' (s + d)
             _ -> s
 
 genOMProgram :: Program -> IO OMProgram
