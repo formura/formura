@@ -391,8 +391,8 @@ calcSizes = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) a
   where
     worker :: MMInstruction -> M.Map OMNodeID Int -> Int
     worker mi tbl = maximum' $ M.foldr go [] mi
-      where go (Node (LoadCursorStatic s _) _ _) acc = (maximum $ abs s):acc
-            go (Node (LoadCursor s oid) _ _) acc = let s' = maximum $ abs s
+      where go (Node (LoadCursorStatic s _) _ _) acc = (maximum s):acc
+            go (Node (LoadCursor s oid) _ _) acc = let s' = maximum s
                                                        n0 = tbl M.! oid
                                                     in  (n0+s'):acc
             go _ acc = acc
