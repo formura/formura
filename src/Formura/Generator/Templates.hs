@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RecordWildCards  #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies     #-}
 module Formura.Generator.Templates where
@@ -17,6 +18,7 @@ import Formura.GlobalEnvironment
 import Formura.NumericalConfig
 import Formura.OrthotopeMachine.Graph
 import Formura.Syntax
+import Formura.Vec
 
 scaffold :: BuildM ()
 scaffold = do
@@ -345,7 +347,6 @@ noBlocking buff rslt s kernelName = do
 
 updateWithTB :: [Int] -> [Int] -> Int -> [(Int,Int)] -> BuildM ()
 updateWithTB gridPerBlock blockPerNode nt boundary = loopWith [("j" ++ show @Int i,l,u,1) | (i,(l,u)) <- zip [1..] boundary] $ \idx -> do
-  axes <- view (omGlobalEnvironment . axesNames)
   dim <- view (omGlobalEnvironment . dimension)
   s <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
   tmpFloor <- getVariable "tmp_floor"
@@ -384,28 +385,50 @@ defFormuraFinalize =
   defGlobalFunction "Formura_Finalize" [] CVoid $ \_ ->
     withMPI $ \_ -> call "MPI_Finalize" []
 
--- Manifestノードの配列サイズを計算する
--- もとの配列サイズ NX+2Ns に比べてどれだけ小さいかを求める
-calcSizes :: MMGraph -> M.Map OMNodeID Int
-calcSizes = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) acc) M.empty
-  where
-    worker :: MMInstruction -> M.Map OMNodeID Int -> Int
-    worker mi tbl = maximum' $ M.foldr go [] mi
-      where go (Node (LoadCursorStatic s _) _ _) acc = (maximum $ abs s):acc
-            go (Node (LoadCursor s oid) _ _) acc = let s' = maximum $ abs s
-                                                       n0 = tbl M.! oid
-                                                    in  (n0+s'):acc
-            go _ acc = acc
+data MMRange = MMRange
+  { lower :: !Int
+  , upper :: !Int
+  }
 
-            maximum' [] = 0
-            maximum' x  = maximum x
+instance Semigroup MMRange where
+  x <> y = MMRange { lower = lower x `min` lower y
+                   , upper = upper x `max` upper y
+                   }
+
+instance Monoid MMRange where
+  mempty = MMRange 0 0
+
+mergeRange :: MMRange -> MMRange -> MMRange
+mergeRange x y = MMRange { lower = lower x + lower y
+                         , upper = upper x + upper y
+                         }
+
+fromCursor :: Vec Int -> MMRange
+fromCursor s = MMRange { lower = minimum s
+                       , upper = maximum s
+                       }
+
+toSize :: MMRange -> Int
+toSize (MMRange {..}) = abs lower + abs upper
+
+toOffset :: MMRange -> Int
+toOffset = abs . lower
+
+calcRange :: MMGraph -> M.Map OMNodeID MMRange
+calcRange = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) acc) M.empty
+  where
+    worker :: MMInstruction -> M.Map OMNodeID MMRange -> MMRange
+    worker mi tbl = M.foldl' go mempty mi
+      where go rng (Node (LoadCursorStatic s _) _ _) = rng <> fromCursor s
+            go rng (Node (LoadCursor s oid) _ _) = rng <> mergeRange (fromCursor s) (tbl M.! oid)
+            go rng _ = rng
 
 mkKernel :: MMGraph -> Int -> [CVariable] -> BuildM ()
 mkKernel mmg sleeve args = do
   -- FIX ME
   let outputSize = getSize $ variableType $ args !! 1
       inputSize = map (+ (2*sleeve)) outputSize
-  let sizeTable = calcSizes mmg
+  let rangeTable = calcRange mmg
   axes <- view (omGlobalEnvironment . axesNames)
   -- 中間変数を生成するかどうかを判定する
   -- 型が void なら最後に Store されているはずなので、中間変数を生成しない
@@ -429,9 +452,9 @@ mkKernel mmg sleeve args = do
       mapTmpType _ (ElemType "float") = CFloat
       mapTmpType _ (ElemType "int") = CInt
       mapTmpType _ (ElemType x) = CRawType x
-      mapTmpType ds (GridType _ x) = CArray [s-2*ds | s <- inputSize] (mapTmpType ds x)
+      mapTmpType ds (GridType _ x) = CArray [s-ds | s <- inputSize] (mapTmpType ds x)
       mapTmpType _ _ = error "Invalid type"
-  sequence_ [declScopedVariable (Just "static") (mapTmpType (sizeTable M.! omid) omt) (tmpName omid) Nothing | (omid,omt) <- tmps]
+  sequence_ [declScopedVariable (Just "static") (mapTmpType (toSize $ rangeTable M.! omid) omt) (tmpName omid) Nothing | (omid,omt) <- tmps]
   -- 命令の変換
   let formatNode i = "a" ++ show i
       mapType' :: MicroNodeType -> CType
@@ -444,11 +467,11 @@ mkKernel mmg sleeve args = do
       mapType' _                     = error "Invalid type"
   let genMicroInst idx _ _ (Store n x) _ | tmpPrefix `isPrefixOf` n = stack <>= [(n ++ show idx) @= formatNode x]
                                          | otherwise = stack <>= [(mkIdent n (args !! 1) idx) @= formatNode x]
-      genMicroInst idx s mmid mi mt =
+      genMicroInst idx rng mmid mi mt =
         let decl x = declScopedVariable Nothing (mapType' mt) (formatNode mmid) (Just x) >> return ()
         in decl $ case mi of
-            (LoadCursorStatic d n) -> mkIdent n (args !! 0) (idx <> (toIdx . toList $ d + pure s))
-            (LoadCursor d oid) -> tmpName oid ++ show (idx <> (toIdx . toList $ d + pure (s-(sizeTable M.! oid))))
+            (LoadCursorStatic d n) -> mkIdent n (args !! 0) (idx <> (toIdx . toList $ d + pure (toOffset rng)))
+            (LoadCursor d oid) -> tmpName oid ++ show (idx <> (toIdx . toList $ d + pure (toOffset rng - (toOffset $ rangeTable M.! oid))))
             (Imm r) -> show (realToFrac r :: Double)
             (Uniop op a) | "external-call" `isPrefixOf` op -> (fromJust $ stripPrefix "external-call/" op) ++ "(" ++ formatNode a ++ ")"
                          | otherwise -> op ++ formatNode a
@@ -459,6 +482,6 @@ mkKernel mmg sleeve args = do
             -- Naryop は廃止かもなので、実装を待つ
             -- Naryop op xs -> undefined
             x -> error $ "Unimplemented for keyword: " ++ show x
-  let genMMInst :: Int -> MMInstruction -> BuildM ()
-      genMMInst s mm = loop [s'-2*s | s' <- inputSize] $ \idx -> sequence_ [genMicroInst idx s mmid mi mt | (mmid, Node mi mt _) <- M.toAscList mm]
-  sequence_ [genMMInst (sizeTable M.! omid) mm | (omid, Node mm _ _) <- M.toAscList mmg']
+  let genMMInst :: MMRange -> MMInstruction -> BuildM ()
+      genMMInst rng mm = loop [s'- toSize rng | s' <- inputSize] $ \idx -> sequence_ [genMicroInst idx rng mmid mi mt | (mmid, Node mi mt _) <- M.toAscList mm]
+  sequence_ [genMMInst (rangeTable M.! omid) mm | (omid, Node mm _ _) <- M.toAscList mmg']
