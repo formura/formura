@@ -25,6 +25,7 @@ import           Formura.Syntax
 
 main :: IO ()
 main = do
+  hSetBuffering stdout LineBuffering
   opts <- getCommandLineOption
   let ?commandLineOption = opts
 
