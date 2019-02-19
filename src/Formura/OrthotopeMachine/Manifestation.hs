@@ -25,7 +25,7 @@ import           Control.Applicative
 import           Control.Lens hiding (op)
 import           Control.Monad
 import           Control.Monad.IO.Class
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 import           Data.Maybe
 import qualified Data.Set as S
 import           Text.Trifecta (failed, raiseErr)

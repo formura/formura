@@ -19,7 +19,7 @@ import           Control.Lens hiding (at, op)
 import           Control.Monad
 import           "mtl" Control.Monad.Reader hiding (fix)
 import           Data.Foldable
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 import           Data.Ratio
 import qualified Data.Set as S
 import           System.Exit
