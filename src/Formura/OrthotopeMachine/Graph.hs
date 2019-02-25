@@ -13,7 +13,7 @@ in http://arxiv.org/abs/1204.4779 .
 {-# LANGUAGE DeriveFoldable             #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE DeriveTraversable          #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -28,7 +28,7 @@ module Formura.OrthotopeMachine.Graph where
 import           Algebra.Lattice
 import           Control.Lens
 import           Data.Data
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 import           Text.Read (Read(..))
 
 import qualified Formura.Annotation as A
@@ -148,7 +148,7 @@ semiLatticeOfOMNodeType :: OMNodeType -> OMNodeType -> OMNodeType
 semiLatticeOfOMNodeType a b = case go a b of
   TopType -> case go b a of
     TopType -> TopType
-    c -> c
+    c       -> c
   c       -> c
   where
     go :: OMNodeType -> OMNodeType -> OMNodeType
@@ -167,8 +167,8 @@ mapElemType _ TopType = TopType
 mapElemType _ _ = error "no match(Formura.OrthotopeMachine.Graph.mapElemType"
 
 data Node instType typeType = Node
-  { _nodeInst :: instType
-  , _nodeType :: typeType
+  { _nodeInst  :: instType
+  , _nodeType  :: typeType
   , _nodeAnnot :: A.Annotation
   }
 
@@ -237,11 +237,11 @@ instance Typed ValueExpr where
 
 data MachineProgram instType typeType = MachineProgram
   { _omGlobalEnvironment :: GlobalEnvironment
-  , _omInitGraph :: Graph instType typeType
-  , _omFirstStepGraph :: Maybe (Graph instType typeType)
-  , _omFilterGraph :: Maybe (Graph instType typeType)
-  , _omStepGraph :: Graph instType typeType
-  , _omStateSignature :: M.Map IdentName TypeExpr
+  , _omInitGraph         :: Graph instType typeType
+  , _omFirstStepGraph    :: Maybe (Graph instType typeType)
+  , _omFilterGraph       :: Maybe (Graph instType typeType)
+  , _omStepGraph         :: Graph instType typeType
+  , _omStateSignature    :: M.Map IdentName TypeExpr
   }
 
 makeClassy ''MachineProgram

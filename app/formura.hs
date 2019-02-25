@@ -25,6 +25,7 @@ import           Formura.Syntax
 
 main :: IO ()
 main = do
+  hSetBuffering stdout LineBuffering
   opts <- getCommandLineOption
   let ?commandLineOption = opts
 
@@ -59,10 +60,6 @@ codegen sugarcoated_prog = do
   omProg <- genOMProgram prog
 
   when (?commandLineOption ^. verbose) $ do
-    putStrLn "## Debug print: global environment of the simulation"
-    print (omProg ^. omGlobalEnvironment)
-    putStrLn ""
-
     putStrLn "## Debug print: simulation state"
     print (omProg ^. omStateSignature)
     putStrLn ""
@@ -73,6 +70,10 @@ codegen sugarcoated_prog = do
 
     putStrLn "## Debug print: step graph"
     mapM_ pprNode $ M.toList (omProg ^. omStepGraph)
+    putStrLn ""
+
+    putStrLn "## Debug print: global environment of the simulation"
+    print (omProg ^. omGlobalEnvironment)
     putStrLn ""
 
   mmProg <- genMMProgram omProg

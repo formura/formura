@@ -19,7 +19,8 @@ import           Control.Lens hiding (at, op)
 import           Control.Monad
 import           "mtl" Control.Monad.Reader hiding (fix)
 import           Data.Foldable
-import qualified Data.Map as M
+import qualified Data.Map.Lazy as ML
+import qualified Data.Map.Strict as M
 import           Data.Ratio
 import qualified Data.Set as S
 import           System.Exit
@@ -610,30 +611,16 @@ lookupToplevelIdents' fprog name0 =  case lup stmts of
     lup (_:xs)                        = lup xs
 
 calcSleeve :: OMGraph -> Int
-calcSleeve g = maximum $ map traceNode $ findStore g
+calcSleeve g = getMax tbl
   where
-    findStore :: OMGraph -> [OMNodeID]
-    findStore = M.foldr getStore []
+    getMax = maximum . map maximum . M.elems
 
-    getStore (Node (Store _ i) _ _) acc = i:acc
-    getStore _ acc                      = acc
-
-    traceNode :: OMNodeID -> Int
-    traceNode i0 = maximum $ go i0 (pure 0)
-      where
-        go :: OMNodeID -> Vec Int -> Vec Int
-        go i s =
-          case M.lookup i g of
-            Just (Node (Load _) _ _) -> s
-            Just (Node (LoadIndex _) _ _) -> s
-            Just (Node (LoadExtent _) _ _) -> s
-            Just (Node (Imm _) _ _) -> s
-            Just (Node (Uniop _ i') _ _) -> go i' s
-            Just (Node (Binop _ i1 i2) _ _) -> go i1 s `max` go i2 s
-            Just (Node (Triop _ i1 i2 i3) _ _) -> maximum [go i1 s,go i2 s,go i3 s]
-            Just (Node (Naryop _ is) _ _) -> maximum [go i' s | i' <- is]
-            Just (Node (Shift d i') _ _) -> go i' (s + d)
-            _ -> s
+    tbl = M.foldlWithKey buildTbl ML.empty g
+    buildTbl acc oid (Node (Shift d i) _ _) = ML.insert oid (d + tbl ML.! i) acc
+    buildTbl acc oid (Node (Uniop _ i) _ _) = ML.insert oid (tbl ML.! i) acc
+    buildTbl acc oid (Node (Binop _ i1 i2) _ _) = ML.insert oid (max (tbl ML.! i1) (tbl ML.! i2)) acc
+    buildTbl acc oid (Node (Triop _ i1 i2 i3) _ _) = ML.insert oid (maximum [tbl ML.! i1,tbl ML.! i2,tbl ML.! i3]) acc
+    buildTbl acc oid _ = ML.insert oid (pure 0) acc
 
 genOMProgram :: Program -> IO OMProgram
 genOMProgram fprog = do

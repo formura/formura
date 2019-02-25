@@ -8,7 +8,7 @@ import           Control.Lens hiding (op)
 import           Control.Monad
 import           Data.Foldable (for_, toList)
 import           Data.List
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 import           Data.Maybe (fromJust)
 import           Text.Printf
 
