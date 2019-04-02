@@ -1,0 +1,283 @@
+dimension :: 3
+axes :: x,y,z
+
+## external functions defined in math.h
+extern function :: sqrt
+extern function :: fabs
+extern function :: exp
+extern function :: sin
+
+## min, max functions
+max = fun(a, b) if a > b then a else b
+min = fun(a, b) if a > b then b else a
+max3 = fun(a, b, c) max(max(a,b),c)
+min3 = fun(a, b, c) min(min(a,b),c)
+
+## parameters
+# max_signal_speed : upper limit of signal speed; |u + S| < max_signal_speed must be satisfied everywhere
+# C_cfl            : Courant number
+# dt               : size of time step
+# gamma            : specific heat ratio
+# M_PI             : mathematical constant pi
+# epsilon          : some small value distinguishable from zero
+# c_h, c_r         : parameters of 9-wave method
+# beta             : parameter of slope limitter
+double :: max_signal_speed = 3
+double :: C_cfl = 0.3
+double :: dt = C_cfl*min3(dx,dy,dz)/max_signal_speed
+double :: gamma = 5.0/3.0
+double :: gamma1 = gamma - 1.0
+double :: M_PI = 3.14159265358979323846
+double :: epsilon = 1.0e-40
+double :: c_h = max_signal_speed
+double :: c_r = 0.18
+double :: beta = 1.0  # MINMOD flux limitter
+#double :: beta = 2.0  # SUPERBEE flux limitter
+
+## functions
+id = fun(A) A
+sum = fun(A) A(0) + A(1) + A(2)
+
+Xf = fun(U) (U[+1/2, +0, +0])
+Xb = fun(U) (U[-1/2, +0, +0])
+Yf = fun(U) (U[+0, +1/2, +0])
+Yb = fun(U) (U[+0, -1/2, +0])
+Zf = fun(U) (U[+0, +0, +1/2])
+Zb = fun(U) (U[+0, +0, -1/2])
+
+ddx = fun(F) (Xf(F) - Xb(F))/dx
+ddy = fun(F) (Yf(F) - Yb(F))/dy
+ddz = fun(F) (Zf(F) - Zb(F))/dz
+nabla = (ddx, ddy, ddz)
+div = fun(V) sum(fun(i) nabla(i) V(i))
+
+YZXcycle = fun(V) (V(1), V(2), V(0))   # YZXcycle.YZXcycle.YZXcycle == id
+ZXYcycle = YZXcycle.YZXcycle           # ZXYcycle.ZXYcycle.ZXYcycle == id
+
+sep_step = fun(x, lval, rval) if x < 0 then lval else rval
+center_step_x = fun(x, lval, rval) sep_step(x - total_grid_x/2, lval, rval)
+center_step_y = fun(y, lval, rval) sep_step(y - total_grid_y/2, lval, rval)
+center_step_z = fun(z, lval, rval) sep_step(z - total_grid_z/2, lval, rval)
+
+sign = fun(x) if x > 0 then 1 else (if x < 0 then -1 else 0)
+small_except = fun(x,a,b) if fabs(x) > epsilon then a else b
+
+sq = fun(x) x*x
+cdot = fun(A, B) sum(A*B)
+norm2 = fun(V) cdot(V,V)
+
+append = fun(A_x, A_t) (A_x, A_t(0), A_t(1))
+separate = fun(A) (A(0), (A(1), A(2)))       # append.separate == id
+extract_x = fun(A) separate(A)(0)
+extract_t = fun(A) separate(A)(1)
+
+## initial conditions of Orszag-Tang vortex problem
+begin function (rho, rho*V, B, e, psi) = init()
+  double [] :: rho, u, v, w, B_x, B_y, B_z, p, psi
+  rho[i,j,k]  = sq(gamma)
+  p[i,j,k]  = gamma
+  u[i,j,k] = -sin(j*dy)
+  v[i,j,k] = sin(i*dx)
+  w[i,j,k] = 0.0
+  B_x[i,j,k] = -sin(j*dy)
+  B_y[i,j,k] = sin(2.0*i*dx)
+  B_z[i,j,k] = 0.0
+  psi[i,j,k] = 0.0
+  V = (u, v, w)
+  B = (B_x, B_y, B_z)
+  e  = p/gamma1 + 0.5*rho*norm2(V) + 0.5*norm2(B)
+end function
+
+begin function (V, p, p_T) = calc_primitive(rho, rhoV, B_t, e, B_x)
+  sqB = (norm2.append)(B_x, B_t)
+  V = rhoV / rho
+  p = gamma1*(e - 0.5*rho*norm2(V) - 0.5*sqB)
+  p_T = p + 0.5*sqB
+end function
+
+begin function (Frho, FrhoV, FB_t, Fe) = MHD_Flux_x(rho, V, B_t, p_T, e, B_x)
+  (u, V_t) = separate(V)
+  B = append(B_x, B_t)
+  Frho = rho*u
+  FrhoV = rho*V*u + (p_T, 0, 0) - B_x*B
+  FB_t = B_t*u - B_x*V_t
+  Fe = (e + p_T)*u - B_x*cdot(V, B)
+end function
+
+begin function F = mean_flux(S_L, S_R, S_stL, S_StarR, S_M, F_L, F_R, U_L, U_R, U_stL, U_stR, U_ststL, U_ststR)
+  F_ststL = F_L + min(S_L, 0)*(U_stL - U_L) + min(S_stL, 0)*(U_ststL - U_stL)
+  F_ststR = F_R + max(S_R, 0)*(U_stR - U_R) + max(S_stR, 0)*(U_ststR - U_stR)
+  F = if S_M > 0 then F_ststL else F_ststR
+end function
+
+begin function (rho_next, rhoV_next, B_next, e_next, psi_next) = time_evol(U, F, G, H)
+  (rho_next, rhoV_next, B_next, e_next, psi_temp) = U - dt * div(F,G,H)
+  psi_next = psi_temp*exp(-dt*c_h/c_r)
+end function
+
+begin function (rho_st, V_st, B_t_st, e_st) = state_star(S_M, p_st, S, rho, V, B_t, e, p_T, B_x)
+  (u, V_t) = separate(V)
+  rho_st = rho * (S - u)/(S - S_M)
+  common_div = rho*(S - u)*(S - S_M) - sq(B_x)
+  vel_factor = small_except(common_div, B_x*(S_M - u)/common_div, 0)
+  V_t_st = V_t - B_t*vel_factor
+  V_st = append(S_M, V_t_st)
+  B_factor = small_except(common_div, (rho*sq(S - u) - sq(B_x))/common_div, 0)
+  B_t_st = B_t*B_factor
+  e_st = ((S - u)*e - p_T*u + p_st*S_M + B_x*(cdot(V, append(B_x, B_t)) - cdot(V_st, append(B_x, B_t_st))))/(S - S_M)
+end function
+
+begin function c_f = fast_wave_speed(rho, p, B_t, B_x)
+  gpb2 = gamma*p + (norm2.append)(B_x, B_t)
+  c_f = sqrt((gpb2 + sqrt(sq(gpb2) - 4.0*gamma*p*sq(B_x)))/(2.0*rho))
+end function
+
+begin function (S_stL, S_stR) = star_speed(S_M, rho_stL, rho_stR, B_x)
+  S_stL = S_M - fabs(B_x)/sqrt(rho_stL)
+  S_stR = S_M + fabs(B_x)/sqrt(rho_stR)
+end function
+
+begin function (S_L, S_R) = fastest_signal_speed((rho_L, p_L, u_L, B_tL), (rho_R, p_R, u_R, B_tR), B_x)
+  c_fL = fast_wave_speed(rho_L, p_L, B_tL, B_x)
+  c_fR = fast_wave_speed(rho_R, p_R, B_tR, B_x)
+  c_f = max(c_fL, c_fR)
+  S_L = min(u_L, u_R) - c_f
+  S_R = max(u_L, u_R) + c_f
+end function
+
+begin function S_M = middle_speed((S_L, rho_L, p_L, u_L), (S_R, rho_R, p_R, u_R))
+  S_M = (p_R - p_L + rho_L*u_L*(S_L - u_L) - rho_R*u_R*(S_R - u_R)) / (rho_L*(S_L - u_L) - rho_R*(S_R - u_R))
+end function
+
+begin function p_st = pressure_star((S_L, rho_L, p_L, u_L), (S_R, rho_R, p_R, u_R))
+  p_st = (rho_L*p_R*(S_L - u_L) - rho_R*p_L*(S_R - u_R) + rho_L*rho_R*(S_R - u_R)*(S_L - u_L)*(u_L - u_R)) / (rho_L*(S_L - u_L) - rho_R*(S_R - u_R))
+end function
+
+begin function (U_ststL, U_ststR) = state_star_star(S_M, (rho_stL, V_stL, B_t_stL, e_stL), (rho_stR, V_stR, B_t_stR, e_stR), B_x)
+  V_t_stL = extract_t(V_stL)
+  V_t_stR = extract_t(V_stR)
+  V_t_stst = (V_t_stL*sqrt(rho_stL) + V_t_stR*sqrt(rho_stR) + (B_t_stR - B_t_stL)*sign(B_x))/(sqrt(rho_stL) + sqrt(rho_stR))
+  V_stst = append(S_M, V_t_stst)
+  B_t_stst = (sqrt(rho_stL)*B_t_stR + sqrt(rho_stR)*B_t_stL + sqrt(rho_stL*rho_stR)*(V_t_stR - V_t_stL)*sign(B_x))/(sqrt(rho_stL) + sqrt(rho_stR))
+  VB_stst = cdot(V_stst, append(B_x, B_t_stst))
+  e_ststL = e_stL - sqrt(rho_stL)*(cdot(V_stL, append(B_x, B_t_stL)) - VB_stst)*sign(B_x)
+  e_ststR = e_stR + sqrt(rho_stR)*(cdot(V_stR, append(B_x, B_t_stR)) - VB_stst)*sign(B_x)
+  U_ststL = (rho_stL, rho_stL*V_stst, B_t_stst, e_ststL)
+  U_ststR = (rho_stR, rho_stR*V_stst, B_t_stst, e_ststR)
+end function
+
+begin function (B_x, psi) = normal_B(B_xL, B_xR, psi_L, psi_R)
+  B_x = 0.5*(B_xL + B_xR) - (0.5/c_h)*(psi_R - psi_L)
+  psi = 0.5*(psi_L + psi_R) - (0.5*c_h)*(B_xR - B_xL)
+end function
+
+begin function (FB_x, Fpsi) = flux_normal_B(B_x, psi)
+  FB_x = psi
+  Fpsi = B_x*sq(c_h)
+end function
+
+## flux of one-dimensional MHD equations evaluated by HLLD method
+begin function F_HLLD = HLLD_Flux((rho_L, rhoV_L, B_tL, e_L), (rho_R, rhoV_R, B_tR, e_R), B_x)
+  (V_L, p_L, p_TL) = calc_primitive(rho_L, rhoV_L, B_tL, e_L, B_x)
+  (V_R, p_R, p_TR) = calc_primitive(rho_R, rhoV_R, B_tR, e_R, B_x)
+  u_L = extract_x(V_L)
+  u_R = extract_x(V_R)
+  manifest :: (S_L, S_R) = fastest_signal_speed((rho_L, p_L, u_L, B_tL), (rho_R, p_R, u_R, B_tR), B_x)
+  manifest :: S_M = middle_speed((S_L, rho_L, p_TL, u_L), (S_R, rho_R, p_TR, u_R))
+  p_st = pressure_star((S_L, rho_L, p_TL, u_L), (S_R, rho_R, p_TR, u_R))
+  (rho_stL, V_stL, B_t_stL, e_stL) = state_star(S_M, p_st, S_L, rho_L, V_L, B_tL, e_L, p_TL, B_x)
+  (rho_stR, V_stR, B_t_stR, e_stR) = state_star(S_M, p_st, S_R, rho_R, V_R, B_tR, e_R, p_TR, B_x)
+  (U_ststL, U_ststR) = state_star_star(S_M, (rho_stL, V_stL, B_t_stL, e_stL), (rho_stR, V_stR, B_t_stR, e_stR), B_x)
+  U_L = (rho_L, rhoV_L, B_tL, e_L)
+  U_R = (rho_R, rhoV_R, B_tR, e_R)
+  U_stL = (rho_stL, rho_stL*V_stL, B_t_stL, e_stL)
+  U_stR = (rho_stR, rho_stR*V_stR, B_t_stR, e_stR)
+  F_L = MHD_Flux_x(rho_L, V_L, B_tL, p_TL, e_L, B_x)
+  F_R = MHD_Flux_x(rho_R, V_R, B_tR, p_TR, e_R, B_x)
+  (S_stL, S_stR) = star_speed(S_M, rho_stL, rho_stR, B_x)
+  F_HLLD = mean_flux(S_L, S_R, S_stL, S_stR, S_M, F_L, F_R, U_L, U_R, U_stL, U_stR, U_ststL, U_ststR)
+end function
+
+begin function (Frho, FrhoV, FB, Fe, Fpsi) = HLLD_Flux_1D((rho_L, rhoV_L, B_L, e_L, psi_L), (rho_R, rhoV_R, B_R, e_R, psi_R), cycle)
+  inv_cycle = cycle.cycle
+  (B_nL, B_tL) = (separate.cycle) B_L
+  (B_nR, B_tR) = (separate.cycle) B_R
+  (B_n, psi) = normal_B(B_nL, B_nR, psi_L, psi_R)
+  cyc_rhoV_L = cycle(rhoV_L)
+  cyc_rhoV_R = cycle(rhoV_R)
+  (Frho, cyc_FrhoV, FB_t, Fe) = HLLD_Flux((rho_L, cyc_rhoV_L, B_tL, e_L), (rho_R, cyc_rhoV_R, B_tR, e_R), B_n)
+  (FB_n, Fpsi) = flux_normal_B(B_n, psi)
+  FrhoV = inv_cycle(cyc_FrhoV)
+  FB = (inv_cycle.append)(FB_n, FB_t)
+end function
+
+HLLD_Flux_x = fun(U_L, U_R) HLLD_Flux_1D(U_L, U_R, id)
+HLLD_Flux_y = fun(U_L, U_R) HLLD_Flux_1D(U_L, U_R, YZXcycle)
+HLLD_Flux_z = fun(U_L, U_R) HLLD_Flux_1D(U_L, U_R, ZXYcycle)
+
+begin function (UR, UL) = TVD_MUSCL(U, Ob, Of)
+  DU = Of(U) - Ob(U)
+  DP = max3(0.0, min(beta*Ob(DU), Of(DU)), min(Ob(DU), beta*Of(DU)))
+  DN = min3(0.0, max(beta*Ob(DU), Of(DU)), max(Ob(DU), beta*Of(DU)))
+  Delta = if Of(DU) > 0 then DP else DN
+  UL = U - 0.5*Delta
+  UR = U + 0.5*Delta
+end function
+
+begin function (Frho, FrhoV, FB_t, Fe) = Flux_fromU((rho, rhoV, B_t, e), B_x)
+  (V, p, p_T) = calc_primitive(rho, rhoV, B_t, e, B_x)
+  (Frho, FrhoV, FB_t, Fe) = MHD_Flux_x(rho, V, B_t, p_T, e, B_x)
+end function
+
+begin function (Frho, FrhoV, FB, Fe, Fpsi) = Flux_fromU_1D((rho, rhoV, B, e, psi), cycle)
+  inv_cycle = cycle.cycle
+  (B_n, B_t) = (separate.cycle) B
+  cyc_rhoV = cycle(rhoV)
+  (Frho, cyc_FrhoV, FB_t, Fe) = Flux_fromU((rho, cyc_rhoV, B_t, e), B_n)
+  (FB_n, Fpsi) = flux_normal_B(B_n, psi)
+  FrhoV = inv_cycle(cyc_FrhoV)
+  FB = (inv_cycle.append)(FB_n, FB_t)
+end function
+
+Flux_x_fromU = fun(U) Flux_fromU_1D(U, id)
+Flux_y_fromU = fun(U) Flux_fromU_1D(U, YZXcycle)
+Flux_z_fromU = fun(U) Flux_fromU_1D(U, ZXYcycle)
+
+begin function (U_L, U_R) = left_right_state(UR, UL, DivF, Ob, Of)
+  ULbar = UL - 0.5*dt*DivF
+  URbar = UR - 0.5*dt*DivF
+  U_L = Ob(URbar)
+  U_R = Of(ULbar)
+end function
+
+## second-order accurate TVD-MUSCL method
+begin function (U_xL, U_xR, U_yL, U_yR, U_zL, U_zR) = MUSCL_Hancock(U)
+  manifest :: (UR_x, UL_x) = TVD_MUSCL(U, Xb, Xf)
+  manifest :: (UR_y, UL_y) = TVD_MUSCL(U, Yb, Yf)
+  manifest :: (UR_z, UL_z) = TVD_MUSCL(U, Zb, Zf)
+  FL = Flux_x_fromU(UL_x)
+  FR = Flux_x_fromU(UR_x)
+  GL = Flux_y_fromU(UL_y)
+  GR = Flux_y_fromU(UR_y)
+  HL = Flux_z_fromU(UL_z)
+  HR = Flux_z_fromU(UR_z)
+  manifest :: DivF = (FR - FL)/dx + (GR - GL)/dy + (HR - HL)/dz
+  (U_xL, U_xR) = left_right_state(UR_x, UL_x, DivF, Xb, Xf)
+  (U_yL, U_yR) = left_right_state(UR_y, UL_y, DivF, Yb, Yf)
+  (U_zL, U_zR) = left_right_state(UR_z, UL_z, DivF, Zb, Zf)
+end function
+
+## first-order accurate
+first_order_LR = fun(U) (Xb(U), Xf(U), Yb(U), Yf(U), Zb(U), Zf(U))
+
+## time step
+begin function U_next = step(rho, (rhou, rhov, rhow), (B_x, B_y, B_z), e, psi)
+  U = (rho, (rhou, rhov, rhow), (B_x, B_y, B_z), e, psi)
+  #(U_xL, U_xR, U_yL, U_yR, U_zL, U_zR) = first_order_LR(U)   # first-order scheme
+  (U_xL, U_xR, U_yL, U_yR, U_zL, U_zR) = MUSCL_Hancock(U)   # second-order scheme
+  manifest :: F = HLLD_Flux_x(U_xL, U_xR)
+  manifest :: G = HLLD_Flux_y(U_yL, U_yR)
+  manifest :: H = HLLD_Flux_z(U_zL, U_zR)
+  U_next = time_evol(U, F, G, H)
+end function
+

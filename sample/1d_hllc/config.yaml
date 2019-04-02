@@ -1,0 +1,2 @@
+length_per_node: [4.0]  # length of each axis per MPI node (Must)
+grid_per_node: [400]   # number of grids of each axis per MPI node (Must)

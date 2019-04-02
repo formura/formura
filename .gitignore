@@ -15,3 +15,5 @@ examples/*/*.h
 examples/*/plot_result.pdf
 examples/*/data/
 .myscripts/
+**/Pipfile
+**/Pipfile.lock

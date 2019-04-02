@@ -1,0 +1,6 @@
+length_per_node: [0.5]  # length of each axis per MPI node (Must)
+grid_per_node: [400]  # number of grids of each axis per MPI node (Must)
+mpi_shape: [8]            # number of MPI nodes of each axis (Optional)
+grid_per_block: [42]     # number of grids of each axis per tempral blocking block (Optional)
+temporal_blocking_interval: 5  # number of time steps of temporal blocking interval (Optional)
+
