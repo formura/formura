@@ -32,6 +32,7 @@ library:
   ghc-options:
   - -fsimpl-tick-factor=326680
   dependencies:
+  - array
   - binary-search >=1.0.0.3
   - blaze-markup
   - cases
