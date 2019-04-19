@@ -31,6 +31,7 @@ import Formura0.Frontend.ParserMonad
   const    { TokenWith _ TokenConst }
   extern   { TokenWith _ TokenExtern }
   manifest { TokenWith _ TokenManifest }
+  "::"     { TokenWith _ TokenTypeSep }
 
 %right in
 %left '+' '-'
@@ -38,10 +39,11 @@ import Formura0.Frontend.ParserMonad
 
 %%
 
-program : decl                        { $1 }
-        | program decl                { $1 <> $2 }
+program : decl                        { Program $1 }
+        | program decl                { $1 <> Program $2 }
 
-decl : texp lexp '=' rexp             { [TypeDecl (getPos $3) $1 $2, Subst (getPos $3) $2 $4] }
+decl : texp "::" lexp '=' rexp        { [TypeDecl (getPos $4) $1 $3, Subst (getPos $4) $3 $5] }
+     | texp0 "::" lexp '=' rexp       { [TypeDecl (getPos $4) (ModifiedTypeExpr [] $1) $3, Subst (getPos $4) $3 $5] }
      | lexp '=' rexp                  { [Subst (getPos $2) $1 $3] }
 
 texp : typeMod texp0                  { ModifiedTypeExpr $1 $2 }

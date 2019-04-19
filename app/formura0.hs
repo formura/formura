@@ -42,5 +42,5 @@ import Formura0.Frontend
 main :: IO ()
 main = do
   opt <- getOption
-  program <- getProgram opt
+  program <- getProgram (inputFilename opt)
   print program

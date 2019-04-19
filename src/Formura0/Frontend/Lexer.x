@@ -31,6 +31,7 @@ tokens :-
   \,                            { withPos TokenSep }
   \(                            { withPos TokenOP }
   \)                            { withPos TokenCP }
+  ::                            { withPos TokenTypeSep }
   $alpha [$alpha $digit \_ \']* { scanWithPos TokenVar }
 
 {
@@ -48,6 +49,7 @@ data Token = TokenLet
            | TokenDiv
            | TokenEq
            | TokenSep
+           | TokenTypeSep
            | TokenOP
            -- ^ open parens
            | TokenCP
