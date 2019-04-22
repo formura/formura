@@ -14,24 +14,30 @@ import Formura0.Frontend.ParserMonad
 %lexer { lexer } { TokenWith _ TokenEOF }
 
 %token
-  let      { TokenWith _ TokenLet }
-  in       { TokenWith _ TokenIn  }
-  end      { TokenWith _ TokenEnd }
-  fun      { TokenWith _ TokenFun }
-  imm      { TokenWith _ (TokenImm $$) }
-  var      { TokenWith _ (TokenVar $$) }
-  '+'      { TokenWith _ TokenAdd }
-  '-'      { TokenWith _ TokenSub }
-  '*'      { TokenWith _ TokenMul }
-  '/'      { TokenWith _ TokenDiv }
-  '='      { TokenWith _ TokenEq }
-  '('      { TokenWith _ TokenOP }
-  ')'      { TokenWith _ TokenCP }
-  ','      { TokenWith _ TokenSep }
-  const    { TokenWith _ TokenConst }
-  extern   { TokenWith _ TokenExtern }
-  manifest { TokenWith _ TokenManifest }
-  "::"     { TokenWith _ TokenTypeSep }
+  let                       { TokenWith _ TokenLet }
+  in                        { TokenWith _ TokenIn  }
+  end                       { TokenWith _ TokenEnd }
+  fun                       { TokenWith _ TokenFun }
+  imm                       { TokenWith _ (TokenImm $$) }
+  int                       { TokenWith _ (TokenInt $$) }
+  var                       { TokenWith _ (TokenVar $$) }
+  '+'                       { TokenWith _ TokenAdd }
+  '-'                       { TokenWith _ TokenSub }
+  '*'                       { TokenWith _ TokenMul }
+  '/'                       { TokenWith _ TokenDiv }
+  '='                       { TokenWith _ TokenEq }
+  '('                       { TokenWith _ TokenOP }
+  ')'                       { TokenWith _ TokenCP }
+  ','                       { TokenWith _ TokenSep }
+  const                     { TokenWith _ TokenConst }
+  extern                    { TokenWith _ TokenExtern }
+  manifest                  { TokenWith _ TokenManifest }
+  "::"                      { TokenWith _ TokenTypeSep }
+  dimension                 { TokenWith _ TokenDim }
+  axes                      { TokenWith _ TokenAxes }
+  grid_struct_type_name     { TokenWith _ TokenGridStructTypeName }
+  grid_struct_instance_name { TokenWith _ TokenGridStructInstanceName }
+
 
 %right in
 %left '+' '-'
@@ -39,42 +45,53 @@ import Formura0.Frontend.ParserMonad
 
 %%
 
-program : decl                        { Program $1 }
-        | program decl                { $1 <> Program $2 }
+program : decl                                   { Program $1 }
+        | program decl                           { $1 <> Program $2 }
 
-decl : texp "::" lexp '=' rexp        { [TypeDecl (getPos $4) $1 $3, Subst (getPos $4) $3 $5] }
-     | texp0 "::" lexp '=' rexp       { [TypeDecl (getPos $4) (ModifiedTypeExpr [] $1) $3, Subst (getPos $4) $3 $5] }
-     | lexp '=' rexp                  { [Subst (getPos $2) $1 $3] }
+decl : decl0                                     { $1 }
+     | specialDecl                               { $1 }
 
-texp : typeMod texp0                  { ModifiedTypeExpr $1 $2 }
+specialDecl : dimension "::" int                 { [SpecialDecl (getPos $1) $ DimensionDeclaration $3] }
+            | axes "::" axesLabels               { [SpecialDecl (getPos $1) $ AxesDeclaration $3] }
+            | grid_struct_type_name "::" var     { [SpecialDecl (getPos $1) $ GridStructTypeNameDeclaration $3] }
+            | grid_struct_instance_name "::" var { [SpecialDecl (getPos $1) $ GridStructInstanceNameDeclaration $3] }
 
-typeMod :                             { [] }
-        | const typeMod               { TMConst:$2 }
-        | extern typeMod              { TMExtern:$2 }
-        | manifest typeMod            { TMManifest:$2 }
+axesLabels : var                                 { [$1] }
+           | axesLabels ',' var                  { $1 <> [$3] }
 
-texp0 : var                           { ElemType $1 }
-      | '(' tupleOftype ')'           { TupleType $2 }
+decl0 : texp "::" lexp '=' rexp                  { [TypeDecl (getPos $4) $1 $3, Subst (getPos $4) $3 $5] }
+      | texp0 "::" lexp '=' rexp                 { [TypeDecl (getPos $4) (ModifiedTypeExpr [] $1) $3, Subst (getPos $4) $3 $5] }
+      | lexp '=' rexp                            { [Subst (getPos $2) $1 $3] }
 
-tupleOftype : texp0                   { [$1] }
-            | texp0 ',' tupleOftype   { $1:$3 }
+texp : typeMod texp0                             { ModifiedTypeExpr $1 $2 }
 
-lexp : var                            { IdentL $1 }
-     | '(' tupleOflexp ')'            { TupleL $2 }
+typeMod :                                        { [] }
+        | const typeMod                          { TMConst:$2 }
+        | extern typeMod                         { TMExtern:$2 }
+        | manifest typeMod                       { TMManifest:$2 }
 
-tupleOflexp : lexp                   { [$1] }
-            | lexp ',' tupleOflexp   { $1:$3 }
+texp0 : var                                      { ElemType $1 }
+      | '(' tupleOftype ')'                      { TupleType $2 }
 
-rexp : rexp '+' rexp                  { Binop "+" $1 $3 }
-     | rexp '-' rexp                  { Binop "-" $1 $3 }
-     | rexp '*' rexp                  { Binop "*" $1 $3 }
-     | rexp '/' rexp                  { Binop "/" $1 $3 }
-     | term                           { $1 }
+tupleOftype : texp0                              { [$1] }
+            | texp0 ',' tupleOftype              { $1:$3 }
 
-term : '(' rexp ')'                   { $2 }
-     | '(' tupleOfrexp ')'            { TupleR $2 }
-     | var                            { IdentR $1 }
-     | imm                            { Imm (toRational $1) }
+lexp : var                                       { IdentL $1 }
+     | '(' tupleOflexp ')'                       { TupleL $2 }
 
-tupleOfrexp : rexp                   { [$1] }
-            | rexp ',' tupleOfrexp   { $1:$3 }
+tupleOflexp : lexp                               { [$1] }
+            | lexp ',' tupleOflexp               { $1:$3 }
+
+rexp : rexp '+' rexp                             { Binop "+" $1 $3 }
+     | rexp '-' rexp                             { Binop "-" $1 $3 }
+     | rexp '*' rexp                             { Binop "*" $1 $3 }
+     | rexp '/' rexp                             { Binop "/" $1 $3 }
+     | term                                      { $1 }
+
+term : '(' rexp ')'                              { $2 }
+     | '(' tupleOfrexp ')'                       { TupleR $2 }
+     | var                                       { IdentR $1 }
+     | imm                                       { Imm (toRational $1) }
+
+tupleOfrexp : rexp                               { [$1] }
+            | rexp ',' tupleOfrexp               { $1:$3 }

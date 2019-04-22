@@ -21,7 +21,11 @@ tokens :-
   const                         { withPos TokenConst }
   extern                        { withPos TokenExtern }
   manifest                      { withPos TokenManifest }
-  $digit+                       { readWithPos TokenImm }
+  dimension                     { withPos TokenDim }
+  axes                          { withPos TokenAxes }
+  grid_struct_type_name         { withPos TokenGridStructTypeName }
+  grid_struct_instance_name     { withPos TokenGridStructInstanceName }
+  $digit+                       { readWithPos TokenInt }
   $digit+\.$digit+              { readWithPos TokenImm }
   \+                            { withPos TokenAdd }
   \-                            { withPos TokenSub }
@@ -57,9 +61,14 @@ data Token = TokenLet
            | TokenVar T.Text
            | TokenImm Scientific
            -- ^ immediate
+           | TokenInt Int
            | TokenConst
            | TokenExtern
            | TokenManifest
+           | TokenDim
+           | TokenAxes
+           | TokenGridStructTypeName
+           | TokenGridStructInstanceName
            | TokenEOF
 
 withPos' f (p, _, _, input) len = return $ TokenWith p (f (take (fromIntegral len) input))
