@@ -35,6 +35,8 @@ tokens :-
   \,                            { withPos TokenSep }
   \(                            { withPos TokenOP }
   \)                            { withPos TokenCP }
+  \[                            { withPos TokenOB }
+  \]                            { withPos TokenCB }
   ::                            { withPos TokenTypeSep }
   $alpha [$alpha $digit \_ \']* { scanWithPos TokenVar }
 
@@ -58,6 +60,10 @@ data Token = TokenLet
            -- ^ open parens
            | TokenCP
            -- ^ close parens
+           | TokenOB
+           -- ^ open bracket
+           | TokenCB
+           -- ^ close bracket
            | TokenVar T.Text
            | TokenImm Scientific
            -- ^ immediate
@@ -69,6 +75,7 @@ data Token = TokenLet
            | TokenAxes
            | TokenGridStructTypeName
            | TokenGridStructInstanceName
+           | TokenFunction
            | TokenEOF
 
 withPos' f (p, _, _, input) len = return $ TokenWith p (f (take (fromIntegral len) input))

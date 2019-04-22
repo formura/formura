@@ -5,6 +5,7 @@ module Formura0.Frontend.Parser where
 import Formura0.Syntax
 import Formura0.Frontend.Lexer
 import Formura0.Frontend.ParserMonad
+import Formura.Vec
 }
 
 %name happyParser
@@ -28,6 +29,8 @@ import Formura0.Frontend.ParserMonad
   '='                       { TokenWith _ TokenEq }
   '('                       { TokenWith _ TokenOP }
   ')'                       { TokenWith _ TokenCP }
+  '['                       { TokenWith _ TokenOB }
+  ']'                       { TokenWith _ TokenCB }
   ','                       { TokenWith _ TokenSep }
   const                     { TokenWith _ TokenConst }
   extern                    { TokenWith _ TokenExtern }
@@ -37,6 +40,7 @@ import Formura0.Frontend.ParserMonad
   axes                      { TokenWith _ TokenAxes }
   grid_struct_type_name     { TokenWith _ TokenGridStructTypeName }
   grid_struct_instance_name { TokenWith _ TokenGridStructInstanceName }
+  function                  { TokenWith _ TokenFunction }
 
 
 %right in
@@ -59,6 +63,8 @@ specialDecl : dimension "::" int                 { [SpecialDecl (getPos $1) $ Di
 axesLabels : var                                 { [$1] }
            | axesLabels ',' var                  { $1 <> [$3] }
 
+-- TODO: 1行に複数の宣言を許容するようにする
+-- TODO: 右辺式がないものもサポートする
 decl0 : texp "::" lexp '=' rexp                  { [TypeDecl (getPos $4) $1 $3, Subst (getPos $4) $3 $5] }
       | texp0 "::" lexp '=' rexp                 { [TypeDecl (getPos $4) (ModifiedTypeExpr [] $1) $3, Subst (getPos $4) $3 $5] }
       | lexp '=' rexp                            { [Subst (getPos $2) $1 $3] }
@@ -70,8 +76,26 @@ typeMod :                                        { [] }
         | extern typeMod                         { TMExtern:$2 }
         | manifest typeMod                       { TMManifest:$2 }
 
-texp0 : var                                      { ElemType $1 }
+texp0 : function                                 { FunType }
+      | var '[' indexOfgridtype ']'              { GridType (Vec $3) (ElemType $1) }
+      | var                                      { ElemType $1 }
       | '(' tupleOftype ')'                      { TupleType $2 }
+
+indexOfgridtype : ratOrEmpty                     { $1 }
+                | ratOrEmpty ',' indexOfgridtype { $1 <> $3 }
+
+ratOrEmpty :                                     { [] }
+           | rat                                 { [$1] }
+
+rat : rat '+' rat                                { $1 + $3 }
+    | rat '-' rat                                { $1 - $3 }
+    | rat '*' rat                                { $1 * $3 }
+    | rat '/' rat                                { $1 / $3 }
+    | numExp                                     { $1 }
+
+numExp : '(' rat ')'                             { $2 }
+       | int                                     { toRational $1 }
+       | imm                                     { toRational $1 }
 
 tupleOftype : texp0                              { [$1] }
             | texp0 ',' tupleOftype              { $1:$3 }
