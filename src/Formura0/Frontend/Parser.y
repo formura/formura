@@ -81,6 +81,9 @@ texp0 : function                                 { FunType }
       | var                                      { ElemType $1 }
       | '(' tupleOftype ')'                      { TupleType $2 }
 
+tupleOftype : texp0                              { [$1] }
+            | texp0 ',' tupleOftype              { $1:$3 }
+
 indexOfgridtype : ratOrEmpty                     { $1 }
                 | ratOrEmpty ',' indexOfgridtype { $1 <> $3 }
 
@@ -97,11 +100,18 @@ numExp : '(' rat ')'                             { $2 }
        | int                                     { toRational $1 }
        | imm                                     { toRational $1 }
 
-tupleOftype : texp0                              { [$1] }
-            | texp0 ',' tupleOftype              { $1:$3 }
-
 lexp : var                                       { IdentL $1 }
+     | var '[' nPlusK ']'                        { GridL (Vec $3) (IdentL $1) }
      | '(' tupleOflexp ')'                       { TupleL $2 }
+
+nPlusK : nPlusK0                                 { $1 }
+       | nPlusK0 ',' nPlusK                      { $1 <> $3 }
+
+nPlusK0 :                                        { [] }
+        | var                                    { [NPlusK $1 0] }
+        | rat                                    { [NPlusK "" $1] }
+        | var '+' rat                            { [NPlusK $1 $3] }
+        | var '-' rat                            { [NPlusK $1 (negate $3)] }
 
 tupleOflexp : lexp                               { [$1] }
             | lexp ',' tupleOflexp               { $1:$3 }
