@@ -1,69 +1,98 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Formura0.Syntax where
 
 import Data.Text (Text)
 
-import Formura.Vec
 import Formura0.Frontend.Lexer
--- ^ 再実装する必要がある
-
--- * 構文木
+import Formura0.Vec
 
 type IdentName = Text
 
-data NPlusK = NPlusK IdentName Rational
-  deriving (Eq,  Show)
+data Decl t l r = TypeDecl !AlexPosn !(ModifiedType t) !l
+                | VarDecl !AlexPosn !l !r
+                | SpcDecl !AlexPosn !SpecialDeclaration
+  deriving (Eq,Show)
 
-data LExpr = GridL !(Vec NPlusK) LExpr
-           | TupleL [LExpr]
-           | Vector !IdentName LExpr -- deprecated
-           | IdentL !IdentName
-  deriving (Eq,  Show)
+type Program = [Statement]
 
-data RExpr = Let !Binding RExpr
-           | Lambda LExpr RExpr
-           | Apply RExpr RExpr
-           | GridR  !(Vec NPlusK) RExpr
-           | TupleR [RExpr]
-           | Uniop  !IdentName RExpr
-           | Binop !IdentName RExpr RExpr
-           | Triop !IdentName RExpr RExpr RExpr
-           | Naryop !IdentName [RExpr]  -- deprecated
-           | IdentR !IdentName
-           | Imm !Rational
-  deriving (Eq, Show)
+-- | type for parser
+type Statement0 = Decl Exp Exp Exp'
 
-data TypeExpr = TopType
-              | GridType !(Vec Rational) TypeExpr
-              | TupleType [TypeExpr]
-              | VectorType !Int TypeExpr -- deprecated
-              | FunType
-              | ElemType !IdentName
-  deriving (Eq, Show)
+-- | type for AST
+type Statement = Decl TExp LExp RExp
+
+data Exp = Ident !IdentName
+         | Tuple [Exp]
+         | Grid !(Vec NPlusK) Exp
+         | None
+  deriving (Eq,Show)
+
+data Exp' = Ident' !IdentName
+          | Imm' !Rational
+          | Tuple' [Exp']
+          | Grid' !(Vec NPlusK) Exp'
+          | Uniop' !Op1 Exp'
+          | Binop' !Op2 Exp' Exp'
+          | Let' ![Statement0] Exp'
+          | Lambda' !Exp Exp'
+          | If' Exp' Exp' Exp'
+          | App' Exp' Exp'
+  deriving (Eq,Show)
+
+data TExp = IdentT !IdentName
+          | TupleT [TExp]
+          | GridT !(Vec Rational) TExp
+          | SomeType
+  deriving (Eq,Show)
+
+data ModifiedType a = ModifiedType ![TypeModifier] a
+  deriving (Eq,Show)
 
 data TypeModifier = TMConst
                   | TMManifest
                   | TMExtern
-  deriving (Eq, Ord, Show)
+  deriving (Eq,Show)
 
-data ModifiedTypeExpr = ModifiedTypeExpr ![TypeModifier] !TypeExpr
-  deriving (Eq, Show)
+data LExp = IdentL !IdentName
+          | TupleL [LExp]
+          | GridL !(Vec NPlusK) LExp
+  deriving (Eq,Show)
 
-data Statement = Subst !AlexPosn !LExpr !RExpr
-               -- ^ substitution
-               | TypeDecl !AlexPosn !ModifiedTypeExpr !LExpr
-               -- ^ type declaration with modification
-               | SpecialDecl !AlexPosn !SpecialDeclaration
-  deriving (Eq, Show)
+data RExp = IdentR !IdentName
+          | ImmR !Rational
+          | TupleR [RExp]
+          | GridR !(Vec NPlusK) RExp
+          | Uniop !Op1 RExp
+          | Binop !Op2 RExp RExp
+          | LetR ![Statement] RExp
+          | LambdaR !LExp RExp
+          | IfR RExp RExp RExp
+          | AppR RExp RExp
+  deriving (Eq,Show)
 
-type Binding = [Statement]
+data Op1 = Plus
+         | Minus
+  deriving (Eq,Show)
 
-data SpecialDeclaration = DimensionDeclaration !Int
-                        | AxesDeclaration ![IdentName]
-                        | GridStructTypeNameDeclaration !IdentName
-                        | GridStructInstanceNameDeclaration !IdentName
-  deriving (Eq, Show)
+data Op2 = Add
+         | Sub
+         | Mul
+         | Div
+         | Pow
+         | And
+         | Or
+         | Eq
+         | NEq
+         | Lt
+         | LEq
+         | Gt
+         | GEq
+  deriving (Eq,Show)
 
-newtype Program = Program [Statement]
-  deriving (Eq, Show, Semigroup, Monoid)
+data SpecialDeclaration = Dimension !Int
+                        | Axes ![IdentName]
+                        | GSTypeName !IdentName
+                        | GSInstanceName !IdentName
+  deriving (Eq,Show)
 
+data NPlusK = NPlusK !IdentName !Rational
+  deriving (Eq,Show)

@@ -2,93 +2,122 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Formura0.Frontend.Parser where
 
-import Formura0.Syntax
-import Formura0.Frontend.Lexer
 import Formura0.Frontend.ParserMonad
-import Formura.Vec
+import Formura0.Frontend.Lexer
+import Formura0.Syntax
+import Formura0.Vec
 }
+
 
 %name happyParser
 %tokentype { TokenWithPos }
-
 %monad { Parser } { thenP } { returnP }
 %lexer { lexer } { TokenWith _ TokenEOF }
 
+
 %token
-  let                       { TokenWith _ TokenLet }
-  in                        { TokenWith _ TokenIn  }
-  end                       { TokenWith _ TokenEnd }
-  fun                       { TokenWith _ TokenFun }
-  imm                       { TokenWith _ (TokenImm $$) }
-  int                       { TokenWith _ (TokenInt $$) }
-  var                       { TokenWith _ (TokenVar $$) }
+  ';'                       { TokenWith _ TokenEOS }
+  '='                       { TokenWith _ TokenEq }
+  '.'                       { TokenWith _ TokenCom }
   '+'                       { TokenWith _ TokenAdd }
   '-'                       { TokenWith _ TokenSub }
   '*'                       { TokenWith _ TokenMul }
   '/'                       { TokenWith _ TokenDiv }
-  '='                       { TokenWith _ TokenEq }
+  "**"                      { TokenWith _ TokenPow }
   '('                       { TokenWith _ TokenOP }
   ')'                       { TokenWith _ TokenCP }
   '['                       { TokenWith _ TokenOB }
   ']'                       { TokenWith _ TokenCB }
   ','                       { TokenWith _ TokenSep }
-  const                     { TokenWith _ TokenConst }
-  extern                    { TokenWith _ TokenExtern }
-  manifest                  { TokenWith _ TokenManifest }
   "::"                      { TokenWith _ TokenTypeSep }
+  "&&"                      { TokenWith _ TokenAnd }
+  "||"                      { TokenWith _ TokenOr }
+  "=="                      { TokenWith _ TokenEQ }
+  "!="                      { TokenWith _ TokenNEQ }
+  '<'                       { TokenWith _ TokenLT }
+  "<="                      { TokenWith _ TokenLE }
+  '>'                       { TokenWith _ TokenGT }
+  ">="                      { TokenWith _ TokenGE }
+  int                       { TokenWith _ (TokenInt $$) }
+  float                     { TokenWith _ (TokenFloat $$) }
+  var                       { TokenWith _ (TokenVar $$) }
   dimension                 { TokenWith _ TokenDim }
   axes                      { TokenWith _ TokenAxes }
-  grid_struct_type_name     { TokenWith _ TokenGridStructTypeName }
-  grid_struct_instance_name { TokenWith _ TokenGridStructInstanceName }
+  grid_struct_type_name     { TokenWith _ TokenGSTypeName }
+  grid_struct_instance_name { TokenWith _ TokenGSInstanceName }
+  const                     { TokenWith _ TokenConst }
+  manifest                  { TokenWith _ TokenManifest }
+  extern                    { TokenWith _ TokenExtern }
+  let                       { TokenWith _ TokenLet }
+  in                        { TokenWith _ TokenIn }
+  fun                       { TokenWith _ TokenFun }
+  if                        { TokenWith _ TokenIf }
+  then                      { TokenWith _ TokenThen }
+  else                      { TokenWith _ TokenElse }
+  begin                     { TokenWith _ TokenBegin }
+  end                       { TokenWith _ TokenEnd }
   function                  { TokenWith _ TokenFunction }
 
-
 %right in
+%nonassoc "==" "!=" '<' "<=" '>' ">="
+%left "||"
+%left "&&"
 %left '+' '-'
 %left '*' '/'
+%left "**"
+%left NEG POS
+%right '.'
 
 %%
 
-program : decl                                   { Program $1 }
-        | program decl                           { $1 <> Program $2 }
+stmts : stmt                                     { $1 }
+      | stmts ';' stmt                           { $1 <> $3 }
 
-decl : decl0                                     { $1 }
-     | specialDecl                               { $1 }
+stmt : specialDecl                               { $1 }
+     | functionDef                               { $1 }
+     | decl                                      { $1 }
 
-specialDecl : dimension "::" int                 { [SpecialDecl (getPos $1) $ DimensionDeclaration $3] }
-            | axes "::" axesLabels               { [SpecialDecl (getPos $1) $ AxesDeclaration $3] }
-            | grid_struct_type_name "::" var     { [SpecialDecl (getPos $1) $ GridStructTypeNameDeclaration $3] }
-            | grid_struct_instance_name "::" var { [SpecialDecl (getPos $1) $ GridStructInstanceNameDeclaration $3] }
+specialDecl : dimension "::" int                 { [SpcDecl (getPos $1) (Dimension $3)] }
+            | axes "::" axesLabels               { [SpcDecl (getPos $1) (Axes $3)] }
+            | grid_struct_type_name "::" var     { [SpcDecl (getPos $1) (GSTypeName $3)] }
+            | grid_struct_instance_name "::" var { [SpcDecl (getPos $1) (GSInstanceName $3)] }
 
 axesLabels : var                                 { [$1] }
            | axesLabels ',' var                  { $1 <> [$3] }
 
--- TODO: 1行に複数の宣言を許容するようにする
--- TODO: 右辺式がないものもサポートする
-decl0 : texp "::" lexp '=' rexp                  { [TypeDecl (getPos $4) $1 $3, Subst (getPos $4) $3 $5] }
-      | texp0 "::" lexp '=' rexp                 { [TypeDecl (getPos $4) (ModifiedTypeExpr [] $1) $3, Subst (getPos $4) $3 $5] }
-      | lexp '=' rexp                            { [Subst (getPos $2) $1 $3] }
+functionDef : begin function rexp '=' var '(' args ')' ';' decls ';' end function { [TypeDecl (getPos $1) (ModifiedType [] None) (Ident $5), VarDecl (getPos $1) (Ident $5) (Lambda' (Tuple $7) (Let' $10 $3)) ] }
 
-texp : typeMod texp0                             { ModifiedTypeExpr $1 $2 }
+decls : decl                                     { $1 }
+      | decls ';' decl                           { $1 <> $3 }
 
-typeMod :                                        { [] }
-        | const typeMod                          { TMConst:$2 }
-        | extern typeMod                         { TMExtern:$2 }
-        | manifest typeMod                       { TMManifest:$2 }
+decl : texp "::" exps                            { map (unwrapExp $1 (getPos $2)) $3 }
+     | exp '=' rexp                              { [TypeDecl (getPos $2) (ModifiedType [] None) $1, VarDecl (getPos $2) $1 $3] }
+     |                                           { [] }
 
-texp0 : function                                 { FunType }
-      | var '[' indexOfgridtype ']'              { GridType (Vec $3) (ElemType $1) }
-      | var                                      { ElemType $1 }
-      | '(' tupleOftype ')'                      { TupleType $2 }
+exps : exp0                                      { $1 }
+     | exps ',' exp0                             { $1 <> $3 }
 
-tupleOftype : texp0                              { [$1] }
-            | texp0 ',' tupleOftype              { $1:$3 }
+exp0 : exp                                       { [Left $1] }
+     | exp '=' rexp                              { [Left $1, Right (VarDecl (getPos $2) $1 $3)] }
 
-indexOfgridtype : ratOrEmpty                     { $1 }
-                | ratOrEmpty ',' indexOfgridtype { $1 <> $3 }
+exp : var                                        { Ident $1 }
+    | function                                   { Ident "function" }
+    | '(' tupleOfexp ')'                         { Tuple $2 }
+    | var '[' nPlusK ']'                         { Grid (Vec $3) (Ident $1) }
 
-ratOrEmpty :                                     { [] }
-           | rat                                 { [$1] }
+tupleOfexp : exp                                 { [$1] }
+           | tupleOfexp ',' exp                  { $1 <> [$3] }
+
+nPlusK : nPlusK0                                 { $1 }
+       | nPlusK ',' nPlusK0                      { $1 <> $3 }
+
+nPlusK0 :                                        { [] }
+        | var                                    { [NPlusK $1 0] }
+        | rat                                    { [NPlusK "" $1] }
+        | '+' rat                                { [NPlusK "" $2] }
+        | '-' rat                                { [NPlusK "" (negate $2)] }
+        | var '+' rat                            { [NPlusK $1 $3] }
+        | var '-' rat                            { [NPlusK $1 (negate $3)] }
 
 rat : rat '+' rat                                { $1 + $3 }
     | rat '-' rat                                { $1 - $3 }
@@ -98,34 +127,64 @@ rat : rat '+' rat                                { $1 + $3 }
 
 numExp : '(' rat ')'                             { $2 }
        | int                                     { toRational $1 }
-       | imm                                     { toRational $1 }
+       | float                                   { toRational $1 }
 
-lexp : var                                       { IdentL $1 }
-     | var '[' nPlusK ']'                        { GridL (Vec $3) (IdentL $1) }
-     | '(' tupleOflexp ')'                       { TupleL $2 }
+texp : tmods exp                                 { ModifiedType $1 $2 }
+     | tmods                                     { ModifiedType $1 None }
+     | exp                                       { ModifiedType [] $1 }
 
-nPlusK : nPlusK0                                 { $1 }
-       | nPlusK0 ',' nPlusK                      { $1 <> $3 }
+tmods : tmod                                     { $1 }
+      | tmods tmod                               { $1 <> $2 }
 
-nPlusK0 :                                        { [] }
-        | var                                    { [NPlusK $1 0] }
-        | rat                                    { [NPlusK "" $1] }
-        | var '+' rat                            { [NPlusK $1 $3] }
-        | var '-' rat                            { [NPlusK $1 (negate $3)] }
+tmod : const                                     { [TMConst] }
+     | manifest                                  { [TMManifest] }
+     | extern                                    { [TMExtern] }
 
-tupleOflexp : lexp                               { [$1] }
-            | lexp ',' tupleOflexp               { $1:$3 }
-
-rexp : rexp '+' rexp                             { Binop "+" $1 $3 }
-     | rexp '-' rexp                             { Binop "-" $1 $3 }
-     | rexp '*' rexp                             { Binop "*" $1 $3 }
-     | rexp '/' rexp                             { Binop "/" $1 $3 }
+rexp : rexp '+' rexp                             { Binop' Add $1 $3 }
+     | rexp '-' rexp                             { Binop' Sub $1 $3 }
+     | rexp '*' rexp                             { Binop' Mul $1 $3 }
+     | rexp '/' rexp                             { Binop' Div $1 $3 }
+     | rexp "**" rexp                            { Binop' Pow $1 $3 }
+     | rexp "||" rexp                            { Binop' Or $1 $3 }
+     | rexp "&&" rexp                            { Binop' And $1 $3 }
+     | rexp "==" rexp                            { Binop' Eq $1 $3 }
+     | rexp "!=" rexp                            { Binop' NEq $1 $3 }
+     | rexp '<' rexp                             { Binop' Lt $1 $3 }
+     | rexp "<=" rexp                            { Binop' LEq $1 $3 }
+     | rexp '>' rexp                             { Binop' Gt $1 $3 }
+     | rexp ">=" rexp                            { Binop' GEq $1 $3 }
+     | '-' rexp %prec NEG                        { Uniop' Minus $2 }
+     | '+' rexp %prec POS                        { Uniop' Plus $2 }
      | term                                      { $1 }
+     | let decls in rexp                         { Let' $2 $4 }
+     | let decls ';' in rexp                     { Let' $2 $5 }
+     | fun '(' args ')' rexp                     { Lambda' (Tuple $3) $5 }
+     | if rexp then rexp else rexp               { If' $2 $4 $6 }
+     | apply                                     { $1 }
+     | var '.' var                               { Lambda' (Ident "x") (App' (Ident' $1) (App' (Ident' $3) (Ident' "x"))) }
 
 term : '(' rexp ')'                              { $2 }
-     | '(' tupleOfrexp ')'                       { TupleR $2 }
-     | var                                       { IdentR $1 }
-     | imm                                       { Imm (toRational $1) }
+     | var                                       { Ident' $1 }
+     | int                                       { Imm' (toRational $1) }
+     | float                                     { Imm' (toRational $1) }
+     | tuple                                     { $1 }
+     | var '[' nPlusK ']'                        { Grid' (Vec $3) (Ident' $1) }
 
-tupleOfrexp : rexp                               { [$1] }
-            | rexp ',' tupleOfrexp               { $1:$3 }
+args :                                           { [] }
+     | arg                                       { [$1] }
+     | args ',' arg                              { $1 <> [$3] }
+
+arg : var                                        { Ident $1 }
+    | '(' args ')'                               { Tuple $2 }
+
+apply : term terms                                { applyChain $1 $2 }
+
+terms : term                                     { [$1] }
+      | terms term                               { $1 <> [$2] }
+
+tuple : '(' rexp ',' restOftuple ')'             { Tuple' ([$2] <> $4) }
+
+restOftuple : rexp                               { [$1] }
+            | restOftuple ',' rexp               { $1 <> [$3] }
+
+
