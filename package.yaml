@@ -23,6 +23,7 @@ dependencies:
 - text
 - trifecta
 - yaml
+- unordered-containers
 
 library:
   source-dirs: src
@@ -50,7 +51,6 @@ library:
   - temporary
   - tostring
   - transformers
-  - unordered-containers
   - vector
 
 executables:
