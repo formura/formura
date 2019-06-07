@@ -33,12 +33,12 @@ data OMProgram = OMProgram
   , axesNames              :: [IdentName]
   , gridStructTypeName     :: IdentName
   , gridStructInstanceName :: IdentName
-  , commBase               :: [[Int]]
+  , commBases              :: [[Int]]
   , globalVariables        :: [(IdentName, TExp)]
   , initGraph              :: OMGraph
   , firstStepGraph         :: Maybe OMGraph
   , filterGraph            :: Maybe OMGraph
-  , stepGraph              :: Maybe OMGraph
+  , stepGraph              :: OMGraph
   }
 
 -- OMGraph に関する操作
