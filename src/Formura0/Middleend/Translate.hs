@@ -5,9 +5,9 @@ import           Data.Bifunctor
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Text as T
 
-import Formura.GlobalEnvironment
 import Formura.NumericalConfig
-import Formura.OrthotopeMachine.Graph
+import Formura0.Frontend.Lexer (AlexPosn)
+import Formura0.OMGraph
 import Formura0.Syntax
 
 -- | * 概要
@@ -17,7 +17,7 @@ import Formura0.Syntax
 -- Formura0.Middleend.Translate.Bridge
 -- で旧実装に変換して、さらに後ろの処理へ流す
 
-type IdentTable = HM.HashMap IdentName (Int, RExp)
+type IdentTable = HM.HashMap IdentName (AlexPosn, RExp)
 
 -- |
 -- genOMProgram の仕様
@@ -30,34 +30,13 @@ type IdentTable = HM.HashMap IdentName (Int, RExp)
 genOMProgram :: Program -> NumericalConfig -> Either String OMProgram
 genOMProgram prog cfg = do
   _ <- globalTypeCheck prog
-  vs <- findGlobalVariables prog
   t <- makeTable prog
-  initGraph <- buildGraph t prog "init"
-  stepGraph <- buildGraph t prog "step"
-  firstStepGraph <- buildGraph' t prog "first_step"
-  filterGraph <- buildGraph' t prog "filter"
-  env <- makeGlobalEnvironment prog cfg (calcSleeve stepGraph) (calcSleeve <$> firstStepGraph) (calcSleeve <$> filterGraph)
-  return MachineProgram
-    { _omGlobalEnvironment = env
-    , _omInitGraph = initGraph
-    , _omFirstStepGraph = firstStepGraph
-    , _omFilterGraph = filterGraph
-    , _omStepGraph = stepGraph
-    , _omStateSignature = undefined
-    }
+  vs <- findGlobalVariables t
+  ig <- buildGraph t prog "init"
+  sg <- buildGraph t prog "step"
+  fsg <- buildGraph' t prog "first_step"
+  flg <- buildGraph' t prog "filter"
 
-calcSleeve :: OMGraph -> Int
-calcSleeve = undefined
-
-makeTable :: Program -> Either String IdentTable
-makeTable = undefined
-
-findGlobalVariables :: Program -> Either String [(IdentName,TExp)]
-findGlobalVariables = undefined
-
-makeGlobalEnvironment :: Program -> NumericalConfig -> Int -> Maybe Int -> Maybe Int -> Either String GlobalEnvironment
-makeGlobalEnvironment prog cfg sleeve sleeve0 sleeveFilter = do
-  cfg' <- bimap show id $ convertConfig sleeve sleeve0 sleeveFilter cfg
   let sp = selectSpecialDecl prog
   dim <- getDim sp
   axes <- getAxes sp dim
@@ -67,14 +46,34 @@ makeGlobalEnvironment prog cfg sleeve sleeve0 sleeveFilter = do
             | dim == 2 = [[1,0],[0,1],[1,1]]
             | dim == 3 = [[1,0,0],[0,1,0],[0,0,1],[1,1,0],[1,0,1],[0,1,1],[1,1,1]]
             | otherwise = error "Not support"
-  return GlobalEnvironment
-    { _dimension = dim
-    , _axesNames = axes
-    , _gridStructTypeName = typeName
-    , _gridStructInstanceName = instanceName
-    , _envNumericalConfig = cfg'
-    , _commBases = bases
+
+  cfg' <- bimap show id $ convertConfig (calcSleeve sg) (calcSleeve <$> fsg) (calcSleeve <$> flg) cfg
+  return OMProgram
+    { config = cfg'
+    , dimension = dim
+    , axesNames = axes
+    , gridStructTypeName = typeName
+    , gridStructInstanceName = instanceName
+    , commBases = bases
+    , globalVariables = vs
+    , initGraph = ig
+    , stepGraph = sg
+    , filterGraph = flg
+    , firstStepGraph = fsg
     }
+
+calcSleeve :: OMGraph -> Int
+calcSleeve = undefined
+
+makeTable :: Program -> Either String IdentTable
+makeTable prog = return $ HM.fromList [ (n,(p,exp)) | VarDecl p l r <- prog, let xs = unwrap l r, (n,exp) <- xs]
+  where
+    unwrap (TupleL xs) r = concat [unwrap x (AppR r (ImmR i)) | (x,i) <- zip xs [0..]]
+    unwrap (IdentL n) r  = [(n,r)]
+    unwrap (GridL _ l) r = unwrap l r
+
+findGlobalVariables :: IdentTable -> Either String [(IdentName,TExp)]
+findGlobalVariables = undefined
 
 selectSpecialDecl :: Program -> [SpecialDeclaration]
 selectSpecialDecl prog = [ s | (SpcDecl _ s) <- prog ]
@@ -85,22 +84,22 @@ getDim sp = case [ d | (Dimension d) <- sp ] of
               []    -> Left "Not found dimension declaration"
               _     -> Left "Multiple dimension declaration"
 
-getAxes :: [SpecialDeclaration] -> Int -> Either String [String]
+getAxes :: [SpecialDeclaration] -> Int -> Either String [IdentName]
 getAxes sp dim = case [ as | (Axes as) <- sp ] of
-                   [as] | length as == dim -> Right (map T.unpack as)
+                   [as] | length as == dim -> Right as
                         | otherwise -> Left "The number of axes does not agree with the dimension"
                    [] -> Left "Not found axes declaration"
                    _ -> Left "Multiple axes declaration"
 
-getGSTypeName :: [SpecialDeclaration] -> Either String String
+getGSTypeName :: [SpecialDeclaration] -> Either String IdentName
 getGSTypeName sp = case [ tn | (GSTypeName tn) <- sp ] of
-                     [n] -> Right (T.unpack n)
+                     [n] -> Right n
                      []  -> Right "Formura_Grid_Struct"
                      _   -> Left "Multiple type name declaration"
 
-getGSInstanceName :: [SpecialDeclaration] -> Either String String
+getGSInstanceName :: [SpecialDeclaration] -> Either String IdentName
 getGSInstanceName sp = case [ n | (GSInstanceName n) <- sp ] of
-                         [n] -> Right (T.unpack n)
+                         [n] -> Right n
                          []  -> Right "formura_data"
                          _   -> Left "Multiple instance name declaration"
 
