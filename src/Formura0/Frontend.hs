@@ -22,6 +22,7 @@ import Formura0.Frontend.Lexer
 import Formura0.Frontend.OptionParser
 import Formura0.Frontend.Parser
 import Formura0.Syntax
+import Formura0.Utils
 import Formura0.Vec
 
 getProgram :: FilePath -> IO Program
@@ -76,4 +77,3 @@ fixRExp (App' e1 e2)      = AppR <$> fixRExp e1 <*> fixRExp e2
 formatError :: AlexPosn -> Either String Statement -> Either String Statement
 formatError _ (Right s)  = Right s
 formatError p (Left err) = Left $ "error:" ++ formatPos p ++ err
-  where formatPos (AlexPn _ l c) = show l ++ "|" ++ show c ++ ": "
