@@ -68,7 +68,7 @@ calcSleeve :: OMGraph -> Int
 calcSleeve = undefined
 
 makeIdentTable :: Program -> Either String IdentTable
-makeIdentTable prog = return $ HM.fromList [ (n,(p,e)) | VarDecl p l r <- prog, let xs = unwrap l r, (n,e) <- xs]
+makeIdentTable prog = return $ HM.fromList [ (n,(p,e)) | VarDecl p l r <- prog, (n,e) <- unwrap l r]
   where
     unwrap (TupleL xs) r = concat [unwrap x (AppR r (ImmR i)) | (x,i) <- zip xs [0..]]
     unwrap (IdentL n) r  = [(n,r)]
