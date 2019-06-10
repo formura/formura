@@ -9,6 +9,7 @@ import Formura.NumericalConfig
 import Formura0.Frontend.Lexer (AlexPosn)
 import Formura0.OMGraph
 import Formura0.Syntax
+import Formura0.Utils
 
 -- | * 概要
 -- AST である Program から OMGraph を生成する
@@ -18,6 +19,7 @@ import Formura0.Syntax
 -- で旧実装に変換して、さらに後ろの処理へ流す
 
 type IdentTable = HM.HashMap IdentName (AlexPosn, RExp)
+type TypeTable = HM.HashMap IdentName TExp
 
 -- |
 -- genOMProgram の仕様
@@ -30,7 +32,7 @@ type IdentTable = HM.HashMap IdentName (AlexPosn, RExp)
 genOMProgram :: Program -> NumericalConfig -> Either String OMProgram
 genOMProgram prog cfg = do
   _ <- globalTypeCheck prog
-  t <- makeTable prog
+  t <- makeIdentTable prog
   vs <- findGlobalVariables t
   ig <- buildGraph t prog "init"
   sg <- buildGraph t prog "step"
@@ -65,15 +67,53 @@ genOMProgram prog cfg = do
 calcSleeve :: OMGraph -> Int
 calcSleeve = undefined
 
-makeTable :: Program -> Either String IdentTable
-makeTable prog = return $ HM.fromList [ (n,(p,exp)) | VarDecl p l r <- prog, let xs = unwrap l r, (n,exp) <- xs]
+makeIdentTable :: Program -> Either String IdentTable
+makeIdentTable prog = return $ HM.fromList [ (n,(p,e)) | VarDecl p l r <- prog, let xs = unwrap l r, (n,e) <- xs]
   where
     unwrap (TupleL xs) r = concat [unwrap x (AppR r (ImmR i)) | (x,i) <- zip xs [0..]]
     unwrap (IdentL n) r  = [(n,r)]
     unwrap (GridL _ l) r = unwrap l r
 
+makeTypeTable :: Program -> Either String TypeTable
+makeTypeTable prog = return $ HM.fromList [ (n,t') | (TypeDecl _ (ModifiedType _ t) l) <- prog, (n,t') <- unwrap l t]
+  where
+    unwrap (IdentL n) t            = [(n,t)]
+    unwrap (GridL _ l) t           = unwrap l t
+    unwrap (TupleL xs) (TupleT ts) = concat [unwrap x t | (x,t) <- zip xs ts]
+    unwrap (TupleL xs) SomeType    = concat [unwrap x SomeType | x <- xs]
+    unwrap _ _                     = error "error" -- FIX ME
+
+typeOf :: IdentName -> TypeTable -> Either String TExp
+typeOf n tbl = case HM.lookup n tbl of
+                 Nothing -> Left $ "Not found " ++ show (T.unpack n)
+                 Just t  -> Right t
+
 findGlobalVariables :: IdentTable -> Either String [(IdentName,TExp)]
-findGlobalVariables = undefined
+findGlobalVariables tbl =
+  case HM.lookup "init" tbl of
+    Nothing              -> Left "Error: Not found init function"
+    Just (p,LambdaR _ r) ->
+      case r of
+        (LetR b (IdentR x)) -> do
+          tt <- makeTypeTable b
+          t <- typeOf x tt
+          return [(x, t)]
+        (LetR b (TupleR xs)) -> do
+          tt <- makeTypeTable b
+          xs' <- unwrap xs
+          ts <- sequence [typeOf x tt | x <- xs']
+          return $ zip xs' ts
+        _ -> Left $ "Error: " ++ formatPos p ++ " init must return a tuple of grid"
+    Just (p,_)           -> Left $ "Error:" ++ formatPos p ++ " init must be a function"
+  where
+    unwrap xs = case [n | (IdentR n) <- xs] of
+                  ys | length ys == length xs -> Right ys
+                     | otherwise -> Left "init must return a tuple of grid"
+
+namesOfLExp :: LExp -> [IdentName]
+namesOfLExp (IdentL n)  = [n]
+namesOfLExp (TupleL xs) = concatMap namesOfLExp xs
+namesOfLExp (GridL _ x) = namesOfLExp x
 
 selectSpecialDecl :: Program -> [SpecialDeclaration]
 selectSpecialDecl prog = [ s | (SpcDecl _ s) <- prog ]
