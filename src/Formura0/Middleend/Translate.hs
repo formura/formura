@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Formura0.Middleend.Translate where
 
-import           Data.Bifunctor
+import           Data.Bifunctor (bimap)
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Text as T
 
@@ -151,12 +151,12 @@ buildGraph tbl prog name = do
     Nothing -> Left $ "Not found " ++ show (T.unpack name) ++ " function"
 
 buildGraph' :: IdentTable -> Program -> IdentName -> Either String (Maybe OMGraph)
-buildGraph' tbl prog name = sequence $ translate tbl <$> lookupGlobalFunction prog name
+buildGraph' tbl prog name = sequence $ translate tbl <$> lookupGlobalFunction tbl name
 
-lookupGlobalFunction :: Program -> IdentName -> Maybe RExp
-lookupGlobalFunction prog name = case [ r | (VarDecl _ l r) <- prog, l == IdentL name] of
-                                   [rexp] -> Just rexp
-                                   _      -> Nothing
+lookupGlobalFunction :: IdentTable -> IdentName -> Maybe RExp
+lookupGlobalFunction tbl name = second <$> HM.lookup name tbl
+  where
+    second (_,b) = b
 
 -- |
 -- 計算グラフ構築の仕様
