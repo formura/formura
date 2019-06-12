@@ -61,8 +61,8 @@ data RExp = IdentR !IdentName
           | ImmR !Rational
           | TupleR [RExp]
           | GridR !(Vec NPlusK) RExp
-          | Uniop !Op1 RExp
-          | Binop !Op2 RExp RExp
+          | UniopR !Op1 RExp
+          | BinopR !Op2 RExp RExp
           | LetR ![Statement] RExp
           | LambdaR !LExp RExp
           | IfR RExp RExp RExp
