@@ -27,6 +27,8 @@ data OMNode = OMNode
 
 type OMGraph = M.Map OMID OMNode
 
+type GlobalVariables = [(IdentName, TExp)]
+
 data OMProgram = OMProgram
   { config                 :: InternalConfig
   , dimension              :: Int
@@ -34,7 +36,7 @@ data OMProgram = OMProgram
   , gridStructTypeName     :: IdentName
   , gridStructInstanceName :: IdentName
   , commBases              :: [[Int]]
-  , globalVariables        :: [(IdentName, TExp)]
+  , globalVariables        :: GlobalVariables
   , initGraph              :: OMGraph
   , firstStepGraph         :: Maybe OMGraph
   , filterGraph            :: Maybe OMGraph
