@@ -3,7 +3,9 @@ module Formura0.Middleend.Translate where
 
 import           Data.Bifunctor (bimap)
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map as M
 import qualified Data.Text as T
+import           Data.Tree
 
 import Formura.NumericalConfig
 import Formura0.Frontend.Lexer (AlexPosn)
@@ -19,7 +21,7 @@ import Formura0.Utils
 -- で旧実装に変換して、さらに後ろの処理へ流す
 
 type IdentTable = HM.HashMap IdentName (AlexPosn, RExp)
-type TypeTable = HM.HashMap IdentName TExp
+type TypeTable = HM.HashMap IdentName ([TypeModifier],TExp)
 
 -- |
 -- genOMProgram の仕様
@@ -32,12 +34,13 @@ type TypeTable = HM.HashMap IdentName TExp
 genOMProgram :: Program -> NumericalConfig -> Either String OMProgram
 genOMProgram prog cfg = do
   _ <- globalTypeCheck prog
-  t <- makeIdentTable prog
-  vs <- findGlobalVariables t
-  ig <- buildGraph t prog "init"
-  sg <- buildGraph t prog "step"
-  fsg <- buildGraph' t prog "first_step"
-  flg <- buildGraph' t prog "filter"
+  iTbl <- makeIdentTable prog
+  tTbl <- makeTypeTable prog
+  vs <- findGlobalVariables iTbl
+  ig <- buildGraph iTbl tTbl vs "init"
+  sg <- buildGraph iTbl tTbl vs "step"
+  fsg <- buildGraph' iTbl tTbl vs "first_step"
+  flg <- buildGraph' iTbl tTbl vs "filter"
 
   let sp = selectSpecialDecl prog
   dim <- getDim sp
@@ -75,7 +78,7 @@ makeIdentTable prog = return $ HM.fromList [ (n,(p,e)) | VarDecl p l r <- prog, 
     unwrap (GridL _ l) r = unwrap l r
 
 makeTypeTable :: Program -> Either String TypeTable
-makeTypeTable prog = return $ HM.fromList [ (n,t') | (TypeDecl _ (ModifiedType _ t) l) <- prog, (n,t') <- unwrap l t]
+makeTypeTable prog = return $ HM.fromList [ (n,(ms,t')) | (TypeDecl _ (ModifiedType ms t) l) <- prog, (n,t') <- unwrap l t]
   where
     unwrap (IdentL n) t            = [(n,t)]
     unwrap (GridL _ l) t           = unwrap l t
@@ -86,7 +89,7 @@ makeTypeTable prog = return $ HM.fromList [ (n,t') | (TypeDecl _ (ModifiedType _
 typeOf :: IdentName -> TypeTable -> Either String TExp
 typeOf n tbl = case HM.lookup n tbl of
                  Nothing -> Left $ "Not found " ++ show (T.unpack n)
-                 Just t  -> Right t
+                 Just t  -> Right (snd t)
 
 findGlobalVariables :: IdentTable -> Either String [(IdentName,TExp)]
 findGlobalVariables tbl =
@@ -143,20 +146,18 @@ getGSInstanceName sp = case [ n | (GSInstanceName n) <- sp ] of
                          []  -> Right "formura_data"
                          _   -> Left "Multiple instance name declaration"
 
-buildGraph :: IdentTable -> Program -> IdentName -> Either String OMGraph
-buildGraph tbl prog name = do
-  mgraph <- buildGraph' tbl prog name
+buildGraph :: IdentTable -> TypeTable -> GlobalVariables -> IdentName -> Either String OMGraph
+buildGraph iTbl tTbl vs name = do
+  mgraph <- buildGraph' iTbl tTbl vs name
   case mgraph of
     Just g  -> Right g
     Nothing -> Left $ "Not found " ++ show (T.unpack name) ++ " function"
 
-buildGraph' :: IdentTable -> Program -> IdentName -> Either String (Maybe OMGraph)
-buildGraph' tbl prog name = sequence $ translate tbl <$> lookupGlobalFunction tbl name
+buildGraph' :: IdentTable -> TypeTable -> GlobalVariables -> IdentName -> Either String (Maybe OMGraph)
+buildGraph' iTbl tTbl vs name = sequence $ translate iTbl tTbl vs <$> lookupGlobalFunction iTbl name
 
 lookupGlobalFunction :: IdentTable -> IdentName -> Maybe RExp
-lookupGlobalFunction tbl name = second <$> HM.lookup name tbl
-  where
-    second (_,b) = b
+lookupGlobalFunction tbl name = snd <$> HM.lookup name tbl
 
 -- |
 -- 計算グラフ構築の仕様
@@ -181,10 +182,114 @@ lookupGlobalFunction tbl name = second <$> HM.lookup name tbl
 -- 5: Binop Add 4 3
 -- 6: Binop Add 1 5
 -- 7: Store q 7
+--
+--
+-- 検討点
+-- - ローカルスコープの実現
+-- - タプルの処理
+-- - グローバル変数の load と store
+--
 
-translate :: IdentTable -> RExp -> Either String OMGraph
-translate tbl (LambdaR args body) = undefined
-translate _ _                     = Left "Not a function"
+translate :: IdentTable -> TypeTable -> GlobalVariables -> RExp -> Either String OMGraph
+translate iTbl tTbl vs (LambdaR args (LetR b xs)) = do
+  typecheck vs args xs
+  iTbl' <- makeIdentTable b
+  tTbl' <- makeTypeTable b
+  (g,ids,_) <- trans (iTbl <> iTbl') (tTbl <> tTbl') vs xs
+  storeResult g ids vs
+translate _ _ _ _                      = Left "Not a function"
+
+-- |
+-- typecheck は、グローバル関数の引数と返り値の数がグローバル変数と一致するか調べる
+typecheck :: GlobalVariables -> LExp -> RExp -> Either String ()
+typecheck vs (TupleL ls) (TupleR rs) = if n == length ls && n == length rs then return () else Left "mismatch the length of tuples"
+  where n = length vs
+typecheck _ _ _ = Left "must be a tuple to tuple function"
+
+trans :: IdentTable -> TypeTable -> GlobalVariables -> RExp -> Either String (OMGraph, Tree OMID, TExp)
+trans iTbl tTbl vs r = undefined
+
+storeResult :: OMGraph -> Tree OMID -> GlobalVariables -> Either String OMGraph
+storeResult g ids vs = return $ foldl (\g0 (i,v) -> store i v g0) g $ zip (flatten ids) (map fst vs)
+  where
+    store i v g0 = let i' = M.size g0
+                       node = OMNode { inst = Store v i
+                                     , theType = IdentT "void"
+                                     , annot = []
+                                     }
+                    in M.insert i' node g0
+
+-- |
+-- trans の仕様
+-- IdentTable を参照しながら、 RExp を評価して OMGraph に挿入していく
+--
+-- Annotation の扱いに注意
+-- - 外部関数
+-- - Manifest 変数
+--
+-- trans :: IdentTable -> RExp -> Either String OMGraph
+-- trans tbl r = (\(a,_,_) -> a) <$> go M.empty r
+--   where
+    -- FIXME:
+    -- - GlobalVariables の扱いを考えなおす (initGraph での構築ではダメでは...)
+    -- - LetR や AppR を考えると IdentTable も go がもちまわる必要がある
+    -- - TupleR を考えると [OMID] でないとダメでは...
+    -- go :: OMGraph -> RExp -> Either String (OMGraph, [OMID], TExp)
+    -- go g0 (ImmR x) = let i = M.size g0
+    --                      t = IdentT "double"
+    --                      node = OMNode { inst = Imm x
+    --                                    , theType = t
+    --                                    , annot = []
+    --                                    }
+    --                      g = M.insert i node g0
+    --                   in return (g,[i],t)
+    -- go g0 (IdentR n) = case HM.lookup n tbl of
+    --                      Nothing -> Left $ "Not found the identifier " ++ show (T.unpack n)
+    --                      Just (_,r) -> go g0 r
+    -- go g0 (TupleR rs) = undefined
+    -- go g0 (UniopR op r) = do
+    --   (g,i,t) <- go g0 r
+    --   let i' = M.size g
+    --       node = OMNode { inst = Uniop op i
+    --                     , theType = t
+    --                     , annot = []
+    --                     }
+    --       g' = M.insert i' node g
+    --   return (g',i',t)
+    -- go g0 (BinopR op r1 r2) = do
+    --   (g1,i1,t1) <- go g0 r1
+    --   (g2,i2,t2) <- go g1 r2
+    --   matchType t1 t2
+    --   let i = M.size g2
+    --       t = inferType op t1
+    --       node = OMNode { inst = Binop op i1 i2
+    --                     , theType = t
+    --                     , annot = []
+    --                     }
+    --       g' = M.insert i node g2
+    --   return (g',i,t)
+    -- go g0 (IfR cond r1 r2) = do
+    --   (g1,i1,t1) <- go g0 cond
+    --   (g2,i2,t2) <- go g1 r1
+    --   (g3,i3,t3) <- go g2 r2
+    --   matchType t1 (IdentT "bool")
+    --   matchType t2 t3
+    --   let i = M.size g3
+    --       node = OMNode { inst = If i1 i2 i3
+    --                     , theType = t2
+    --                     , annot = []
+    --                     }
+    --       g' = M.insert i node g3
+    --   return (g',i,t2)
+
+matchType :: TExp -> TExp -> Either String ()
+matchType t1 t2 | t1 == t2 = return ()
+                | otherwise = Left $ "Not match types: " ++ show t1 ++ " /= " ++ show t2
+
+inferType :: Op2 -> TExp -> TExp
+inferType op t = if isArith op then t else IdentT "bool"
+  where
+    isArith o = o `elem` [Add,Sub,Mul,Div,Pow]
 
 -- | グローバル関数の型検査
 --   init, step, first_step, filter の引数と返り値の型が一致しているか確認する
