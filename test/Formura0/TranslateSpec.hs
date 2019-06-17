@@ -11,11 +11,14 @@ import Formura0.Vec
 
 spec :: Spec
 spec = do
+  describe "Tree" $ do
+    it "check flatten" $
+      flatten (Node [Leaf "a", Node [Leaf "b", Leaf "c"], Leaf "d"]) `shouldBe` (["a","b","c","d"] :: [String])
   describe "makeIdentTable" $ do
     it "check a simple case" $
       makeIdentTable [ VarDecl (AlexPn 1 1 1) (IdentL "x") (ImmR 1.0)
-                , VarDecl (AlexPn 2 2 2) (TupleL [IdentL "a",IdentL "b"]) (Binop Add (IdentR "x") (IdentR "y"))]
-        `shouldBe` Right (HM.fromList [("x", (AlexPn 1 1 1, ImmR 1.0)),("a",(AlexPn 2 2 2, AppR (Binop Add (IdentR "x") (IdentR "y")) (ImmR 0))),("b",(AlexPn 2 2 2, AppR (Binop Add (IdentR "x") (IdentR "y")) (ImmR 1)))])
+                , VarDecl (AlexPn 2 2 2) (TupleL [IdentL "a",IdentL "b"]) (BinopR Add (IdentR "x") (IdentR "y"))]
+        `shouldBe` Right (HM.fromList [("x", (AlexPn 1 1 1, ImmR 1.0)),("a",(AlexPn 2 2 2, AppR (BinopR Add (IdentR "x") (IdentR "y")) (ImmR 0))),("b",(AlexPn 2 2 2, AppR (BinopR Add (IdentR "x") (IdentR "y")) (ImmR 1)))])
     it "check a complex case" $
       makeIdentTable [ VarDecl (AlexPn 1 1 1) (TupleL [IdentL "a", TupleL [IdentL "b", IdentL "c"], IdentL "d"]) (IdentR "x")]
         `shouldBe` Right (HM.fromList [ ("a", (AlexPn 1 1 1, AppR (IdentR "x") (ImmR 0)))
