@@ -54,7 +54,7 @@ data TypeModifier = TMConst
 
 data LExp = IdentL !IdentName
           | TupleL [LExp]
-          | GridL !(Vec NPlusK) LExp
+          | GridL !(Vec IdentName) LExp
   deriving (Eq,Show)
 
 data RExp = IdentR !IdentName

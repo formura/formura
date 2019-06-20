@@ -54,13 +54,18 @@ fixTExp (ModifiedType ms t) = ModifiedType ms <$> fixTExp' t
 fixIndex :: Vec NPlusK -> Either String (Vec Rational)
 fixIndex (Vec npk) = Vec <$> mapM fixNpK npk
   where fixNpK (NPlusK "" x) = return x
-        fixNpK _             = Left "invalid exp in Grid index"
+        fixNpK _             = Left "invalid exp in grid type index"
 
 fixLExp :: Exp -> Either String LExp
 fixLExp (Ident n)  = return $ IdentL n
 fixLExp (Tuple xs) = TupleL <$> (mapM fixLExp xs)
-fixLExp (Grid i e) = GridL i <$> fixLExp e
+fixLExp (Grid i e) = GridL <$> fixIndex' i <*> fixLExp e
 fixLExp None       = Left "invalid exp in LExp"
+
+fixIndex' :: Vec NPlusK -> Either String (Vec IdentName)
+fixIndex' (Vec npk) = Vec <$> mapM fixNpK npk
+  where fixNpK (NPlusK n x) | x == 0 = return n
+        fixNpK _            = Left "invalid exp in LHS grid index"
 
 fixRExp :: Exp' -> Either String RExp
 fixRExp (Ident' n)        = return $ IdentR n
