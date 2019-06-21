@@ -1,3 +1,7 @@
 module Formura0.Annotation where
 
-data Annot = Annot
+import Formura0.Syntax
+
+data Annot = SourceName !IdentName
+           | ManifestNode
+  deriving (Eq,Show)
