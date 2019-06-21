@@ -11,12 +11,12 @@ type OMID = Int
 
 data OMInst = Load !(Vec Int) !OMID
             | Store !IdentName !OMID
+            | LoadGlobal !(Vec Int) !IdentName
             | LoadIndex !Int
             | Uniop !Op1 !OMID
             | Binop !Op2 !OMID !OMID
             | If !OMID !OMID !OMID
             | Imm !Rational
-            | Ident !IdentName
             | Call1 !IdentName ![OMID] !OMID
             | CallN !IdentName ![OMID] ![OMID]
 
