@@ -319,7 +319,7 @@ transValue t0 (p,idx,v) =
     ValueI i     -> insertNode (LoadIndex i) (IdentT "int") []
 
   where
-    updateEnv p1 ns e = let iTbl = HM.fromList [(n,(p1,[],ValueI x)) | (n,x) <- zip idx [0..]]
+    updateEnv p1 ns e = let iTbl = HM.fromList [(n,(p1,[],ValueI x)) | (n,x) <- zip ns [0..]]
                         in e { identTable = iTbl |+> identTable e
                              , sourcePos = p1
                              }
