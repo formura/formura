@@ -1,5 +1,7 @@
 {-# LANGUAGE BangPatterns               #-}
+{-# LANGUAGE DeriveFoldable             #-}
 {-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DeriveTraversable          #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings          #-}
@@ -54,12 +56,7 @@ new |+> old = new <> old
 
 data Tree a = Leaf !a
             | Node [Tree a]
-  deriving (Eq,Show,Functor)
-
-instance Foldable Tree where
-  foldr f acc (Leaf x)      = f x acc
-  foldr _ acc (Node [])     = acc
-  foldr f acc (Node (x:xs)) = foldr f (foldr f acc x) (Node xs)
+  deriving (Eq,Show,Functor,Foldable,Traversable)
 
 flatten :: Tree a -> [a]
 flatten (Leaf a)  = [a]
@@ -286,7 +283,7 @@ typecheck vs (TupleL ls) (TupleR rs) = if n == length ls && n == length rs then 
   where n = length vs
 typecheck _ _ _ = Left "must be a tuple to tuple function"
 
-insertNode :: MonadState OMGraph m => OMInst -> TExp -> [Annot] -> m (Tree (OMID, TExp))
+insertNode :: MonadState OMGraph m => OMInst -> TExp -> [Annot] -> m (OMID, TExp)
 insertNode i t as = do
   g <- get
   let omid = M.size g
@@ -295,12 +292,12 @@ insertNode i t as = do
                     , annot = as
                     }
   put $! M.insert omid node g
-  return $ Leaf (omid, t)
+  return $ (omid, t)
 
 
 trans :: TExp -> RExp -> TransM (Tree (OMID, TExp))
 trans t (IdentR n) = do
-  whenGlobal n (\t' -> insertNode (LoadGlobal (vec [0,0,0]) n) t' [SourceName n]) $ do
+  whenGlobal n (\t' -> Leaf <$> insertNode (LoadGlobal (vec [0,0,0]) n) t' [SourceName n]) $ do
     v <- lookupIdent n
     b <- isManifest n
     let as = if b then [SourceName n, ManifestNode] else [SourceName n]
@@ -310,21 +307,21 @@ trans t (IdentR n) = do
 trans t (ImmR x) =
   if not (isNumType t)
      then reportError $ "invalid type: " ++ show x ++ " is not " ++ show t
-     else insertNode (Imm x) t []
+     else Leaf <$> insertNode (Imm x) t []
 trans t (TupleR xs) =
   Node <$> case t of
     TupleT ts | length xs == length ts -> zipWithM trans ts xs
     SomeType -> mapM (trans SomeType) xs
     _ -> reportError $ "invalid type: " ++ show (TupleR xs) ++ " is not " ++ show t
-trans t (GridR idx r) = trans t r >>= transGrid idx
-trans t (UniopR op r) = trans t r >>= transUniop op
+trans t (GridR idx r) = trans t r >>= mapM (transGrid idx)
+trans t (UniopR op r) = trans t r >>= mapM (transUniop op)
 
 transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
 transValue t0 (p,idx,v) =
   case v of
     ValueR r  -> local (updateEnv p idx) $ trans t0 r
     ValueN xs -> return xs
-    ValueI i  -> insertNode (LoadIndex i) (IdentT "int") []
+    ValueI i  -> Leaf <$> insertNode (LoadIndex i) (IdentT "int") []
 
   where
     updateEnv p1 ns e = let iTbl = HM.fromList [(n,(p1,[],ValueI x)) | (n,x) <- zip ns [0..]]
@@ -332,8 +329,8 @@ transValue t0 (p,idx,v) =
                              , sourcePos = p1
                              }
 
-transGrid :: Vec NPlusK -> Tree (OMID,TExp) -> TransM (Tree (OMID,TExp))
-transGrid npk res@(Leaf (i,t)) =
+transGrid :: Vec NPlusK -> (OMID,TExp) -> TransM (OMID,TExp)
+transGrid npk res@(i,t) =
   case t of
     IdentT _ -> return res
     GridT off t' -> do
@@ -342,13 +339,13 @@ transGrid npk res@(Leaf (i,t)) =
           newOff = (-) <$> newPos <*> (fmap fromIntegral intOff)
           t1 = GridT newOff t'
       if intOff == (vec [0,0,0])
-         then return $ Leaf (i,t1)
+         then return $ (i,t1)
          else insertNode (Load (fmap negate intOff) i) t1 []
     _ -> reportError "bug in transGrid"
-transGrid npk (Node xs) = Node <$> mapM (transGrid npk) xs
 
-transUniop :: Op1 -> Tree (OMID,TExp) -> TransM (Tree (OMID,TExp))
-transUniop op res = undefined
+transUniop :: Op1 -> (OMID,TExp) -> TransM (OMID,TExp)
+transUniop op (i,t) | isNumType t = insertNode (Uniop op i) t []
+                    | otherwise = reportError $ "invalid type: " ++ show t ++ " is not numeric type"
 
 whenGlobal :: IdentName -> (TExp -> TransM a) -> TransM a -> TransM a
 whenGlobal n act1 act2 = do
