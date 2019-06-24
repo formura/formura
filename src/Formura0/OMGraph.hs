@@ -19,12 +19,13 @@ data OMInst = Load !(Vec Int) !OMID
             | Imm !Rational
             | Call1 !IdentName ![OMID] !OMID
             | CallN !IdentName ![OMID] ![OMID]
+  deriving (Show)
 
 data OMNode = OMNode
   { inst    :: !OMInst
   , theType :: !TExp
   , annot   :: ![Annot]
-  }
+  } deriving (Show)
 
 type OMGraph = M.Map OMID OMNode
 

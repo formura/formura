@@ -424,14 +424,14 @@ lookupIdent n = do
     Nothing -> reportError $ "Not found the identifier " ++ show (T.unpack n)
     Just x  -> return x
 
-evalToInt :: RExp -> IdentTable -> Either String Int
-evalToInt (ImmR n) _ = if denominator n == 1 then return (fromInteger $ numerator n) else Left "non-integer indexing in tuple access"
-evalToInt (IdentR n) tbl = do
-  (_,_,v) <- lookupIdent n tbl
-  case v of
-    ValueR r -> evalToInt r tbl
-    _        -> Left ""
-evalToInt r _ = Left $ show r ++ " is not integer"
+-- evalToInt :: RExp -> IdentTable -> Either String Int
+-- evalToInt (ImmR n) _ = if denominator n == 1 then return (fromInteger $ numerator n) else Left "non-integer indexing in tuple access"
+-- evalToInt (IdentR n) tbl = do
+--   (_,_,v) <- lookupIdent n tbl
+--   case v of
+--     ValueR r -> evalToInt r tbl
+--     _        -> Left ""
+-- evalToInt r _ = Left $ show r ++ " is not integer"
 
 bindArgs :: AlexPosn -> LExp -> Tree OMID -> Either String IdentTable
 bindArgs p (TupleL ls) (Node ids) | length ls == length ids = undefined
