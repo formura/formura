@@ -62,6 +62,9 @@ flatten :: Tree a -> [a]
 flatten (Leaf a)  = [a]
 flatten (Node ts) = concatMap flatten ts
 
+unzipTree :: [(Tree a,TExp)] -> (Tree a, TExp)
+unzipTree = (\(xs,ts) -> (Node xs, TupleT ts)) . unzip
+
 data Env = Env
   { identTable :: !IdentTable
   , typeTable  :: !TypeTable
@@ -306,10 +309,13 @@ trans t (ImmR x) =
      then reportError $ "invalid type: " ++ show x ++ " is not " ++ show t
      else insertNode (Imm x) t []
 trans t (TupleR xs) =
-  (\(ids,ts') -> (Node ids,TupleT ts')) . unzip <$> case t of
+  unzipTree <$> case t of
     TupleT ts | length xs == length ts -> zipWithM trans ts xs
     SomeType -> mapM (trans SomeType) xs
     _ -> reportError $ "invalid type: " ++ show (TupleR xs) ++ " is not " ++ show t
+trans t (GridR idx r) = do
+  (ids,t1) <- trans t r
+  transGrid idx ids t1
 
 transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree OMID, TExp)
 transValue t0 (p,idx,v) =
@@ -323,6 +329,25 @@ transValue t0 (p,idx,v) =
                         in e { identTable = iTbl |+> identTable e
                              , sourcePos = p1
                              }
+
+transGrid :: Vec NPlusK -> Tree OMID -> TExp -> TransM (Tree OMID, TExp)
+transGrid npk ids t =
+  case t of
+    IdentT _ -> return (ids,t)
+    GridT off t' -> do
+      let newPos = (-) <$> off <*> (fmap (\(NPlusK _ x) -> x) npk)
+          intOff = fmap floor newPos
+          newOff = (-) <$> newPos <*> (fmap fromIntegral intOff)
+          t1 = GridT newOff t'
+      if intOff == (vec [0,0,0])
+         then return (ids,t1)
+         else case ids of
+                Leaf i -> insertNode (Load (fmap negate intOff) i) t1 []
+                _      -> reportError $ "bug in transGrid"
+    TupleT ts -> case ids of
+                   Node xs | length xs == length ts -> unzipTree <$> zipWithM (\i t0 -> transGrid npk i t0) xs ts
+                   _ -> reportError "bug in transGrid"
+    SomeType -> reportError "something wrong in transGrid"
 
 whenGlobal :: IdentName -> (TExp -> TransM a) -> TransM a -> TransM a
 whenGlobal n act1 act2 = do
