@@ -315,6 +315,10 @@ trans t (TupleR xs) =
     _ -> reportError $ "invalid type: " ++ show (TupleR xs) ++ " is not " ++ show t
 trans t (GridR idx r) = trans t r >>= mapM (transGrid idx)
 trans t (UniopR op r) = trans t r >>= mapM (transUniop op)
+trans t (BinopR op r1 r2) = do
+  x1 <- trans t r1
+  x2 <- trans t r2
+  transBinop op x1 x2
 
 transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
 transValue t0 (p,idx,v) =
@@ -346,6 +350,15 @@ transGrid npk res@(i,t) =
 transUniop :: Op1 -> (OMID,TExp) -> TransM (OMID,TExp)
 transUniop op (i,t) | isNumType t = insertNode (Uniop op i) t []
                     | otherwise = reportError $ "invalid type: " ++ show t ++ " is not numeric type"
+
+transBinop :: Op2 -> Tree (OMID,TExp) -> Tree (OMID,TExp) -> TransM (Tree (OMID,TExp))
+transBinop op (Leaf (i1,t1)) (Leaf (i2,t2)) = do
+  t3 <- inferType op =<< matchType t1 t2
+  Leaf <$> insertNode (Binop op i1 i2) t3 []
+transBinop op (Node xs1) x2@(Leaf _) = Node <$> mapM (\x1 -> transBinop op x1 x2) xs1
+transBinop op x1@(Leaf _) (Node xs2) = Node <$> mapM (\x2 -> transBinop op x1 x2) xs2
+transBinop op (Node xs1) (Node xs2) | length xs1 == length xs2 = Node <$> zipWithM (transBinop op) xs1 xs2
+                                    | otherwise = reportError $ "tuple length mismatch"
 
 whenGlobal :: IdentName -> (TExp -> TransM a) -> TransM a -> TransM a
 whenGlobal n act1 act2 = do
@@ -544,12 +557,23 @@ updateAnnots as ids = mapM_ addAnnots (flatten ids)
   where
     addAnnots (i,_) = modify' (\g -> M.adjust (\n -> n { annot = as }) i g)
 
-matchType :: TExp -> TExp -> Either String ()
-matchType t1 t2 | t1 == t2 = return ()
-                | otherwise = Left $ "Not match types: " ++ show t1 ++ " /= " ++ show t2
+matchType :: TExp -> TExp -> TransM TExp
+matchType (IdentT t1) (IdentT t2) | t1 == t2 = return $ IdentT t1
+                                  | match ["float","double"] = return $ IdentT "double"
+                                  | match ["int","double"] = return $ IdentT "double"
+                                  | match ["int","float"] = return $ IdentT "float"
+  where match ts = t1 `elem` ts && t2 `elem` ts
+matchType (GridT npk1 t1) t2@(IdentT _) = GridT npk1 <$> matchType t1 t2
+matchType t1@(IdentT _) (GridT npk2 t2) = GridT npk2 <$> matchType t1 t2
+matchType (GridT npk1 t1) (GridT npk2 t2) | npk1 == npk2 = GridT npk1 <$> matchType t1 t2
+matchType t1 t2 = reportError $ "type mismatch: " ++ show t1 ++ " /= " ++ show t2
 
-inferType :: Op2 -> TExp -> TExp
-inferType op t = if isArith op then t else IdentT "bool"
+inferType :: Op2 -> TExp -> TransM TExp
+inferType op t | isArith op = if isNumType t then return t else reportError $ "invalid type: " ++ show t ++ " is not numeric type"
+               | otherwise = case t of
+                               IdentT _    -> return $ IdentT "bool"
+                               GridT npk _ -> return $ GridT npk (IdentT "bool")
+                               _           -> reportError "bug in inferType"
   where
     isArith o = o `elem` [Add,Sub,Mul,Div,Pow]
 
