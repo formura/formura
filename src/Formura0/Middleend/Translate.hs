@@ -306,7 +306,7 @@ trans t (ImmR x) =
      then reportError $ "invalid type: " ++ show x ++ " is not " ++ show t
      else insertNode (Imm x) t []
 trans t (TupleR xs) =
- (\(ids,ts') -> (Node ids,TupleT ts')) . unzip <$> case t of
+  (\(ids,ts') -> (Node ids,TupleT ts')) . unzip <$> case t of
     TupleT ts | length xs == length ts -> zipWithM trans ts xs
     SomeType -> mapM (trans SomeType) xs
     _ -> reportError $ "invalid type: " ++ show (TupleR xs) ++ " is not " ++ show t
