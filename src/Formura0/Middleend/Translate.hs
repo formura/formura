@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns               #-}
 {-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings          #-}
 module Formura0.Middleend.Translate where
@@ -14,6 +15,7 @@ import           Data.Hashable (Hashable)
 import qualified Data.HashMap.Strict as HM
 import           Data.List
 import qualified Data.Map as M
+import           Data.Maybe
 import           Data.Ratio
 import qualified Data.Text as T
 
@@ -65,7 +67,7 @@ data Env = Env
   , typeTable  :: !TypeTable
   , gVariables :: !GlobalVariables
   , sourcePos  :: !AlexPosn
-  }
+  } deriving (Show)
 
 type TransError = String
 
@@ -80,6 +82,20 @@ run :: IdentTable -> TypeTable -> GlobalVariables -> AlexPosn -> TransM a -> Eit
 run iTbl tTbl vs p act = execStateT (runReaderT (runTrans act) env) M.empty
   where
     env = Env iTbl tTbl vs p
+
+reportError :: TransError -> TransM a
+reportError msg = do
+  e <- ask
+  g <- get
+  throwError $
+    unlines [ "Error: " ++ formatPos (sourcePos e) ++ " " ++ msg
+            , "  reported in translate"
+            , "  env:"
+            , "    " ++ show e
+            , ""
+            , "  graph:"
+            , "    " ++ show g
+            ]
 
 -- |
 -- genOMProgram の仕様
@@ -264,17 +280,47 @@ typecheck vs (TupleL ls) (TupleR rs) = if n == length ls && n == length rs then 
   where n = length vs
 typecheck _ _ _ = Left "must be a tuple to tuple function"
 
-insertNode :: OMGraph -> OMInst -> TExp -> [Annot] -> (OMGraph, Tree OMID, TExp)
-insertNode g i t as = (M.insert omid node g,Leaf omid,t)
-  where
-    omid = M.size g
-    node = OMNode { inst = i
-                  , theType = t
-                  , annot = as
-                  }
+insertNode :: MonadState OMGraph m => OMInst -> TExp -> [Annot] -> m (Tree OMID, TExp)
+insertNode i t as = do
+  g <- get
+  let omid = M.size g
+      node = OMNode { inst = i
+                    , theType = t
+                    , annot = as
+                    }
+  put $! M.insert omid node g
+  return (Leaf omid, t)
+
 
 trans :: TExp -> RExp -> TransM (Tree OMID, TExp)
-trans = undefined
+trans t (IdentR n) = do
+  whenGlobal n (\t' -> insertNode (LoadGlobal (vec [0,0,0]) n) t' [SourceName n]) $ do
+    v <- lookupIdent n
+    b <- isManifest n
+    let as = if b then [SourceName n, ManifestNode] else [SourceName n]
+    (ids,t1) <- transValue t v
+    updateAnnots as ids
+    return (ids,t1)
+
+transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree OMID, TExp)
+transValue t0 (p,idx,v) =
+  case v of
+    ValueR r     -> local (updateEnv p idx) $ trans t0 r
+    ValueN ids t -> return (ids,t)
+    ValueI i     -> insertNode (LoadIndex i) (IdentT "int") []
+
+  where
+    updateEnv p1 ns e = let iTbl = HM.fromList [(n,(p1,[],ValueI x)) | (n,x) <- zip idx [0..]]
+                        in e { identTable = iTbl |+> identTable e
+                             , sourcePos = p1
+                             }
+
+whenGlobal :: IdentName -> (TExp -> TransM a) -> TransM a -> TransM a
+whenGlobal n act1 act2 = do
+  vs <- reader gVariables
+  if n `elem` (map fst vs)
+     then act1 (fromJust $ lookup n vs)
+     else act2
 
 --trans :: IdentTable -> TypeTable -> GlobalVariables -> OMGraph -> TExp -> AlexPosn -> RExp -> Either String (OMGraph, Tree OMID, TExp)
 --trans !iTbl !tTbl vs !g t _ (IdentR n)
@@ -367,10 +413,12 @@ trans = undefined
 --      trans (iTbl <> iTbl') tTbl vs g t p r
 --    _ -> Left $ "error: " ++ show r1 ++ "is not appliable"
 
-lookupIdent :: IdentName -> IdentTable -> Either String (AlexPosn, [IdentName], Value)
-lookupIdent n tbl = case HM.lookup n tbl of
-                      Nothing -> Left $ "Not found the identifier " ++ show (T.unpack n)
-                      Just x -> return x
+lookupIdent :: IdentName -> TransM (AlexPosn, [IdentName], Value)
+lookupIdent n = do
+  tbl <- reader identTable
+  case HM.lookup n tbl of
+    Nothing -> reportError $ "Not found the identifier " ++ show (T.unpack n)
+    Just x  -> return x
 
 evalToInt :: RExp -> IdentTable -> Either String Int
 evalToInt (ImmR n) _ = if denominator n == 1 then return (fromInteger $ numerator n) else Left "non-integer indexing in tuple access"
@@ -405,10 +453,10 @@ foldTree f g (Node (x:xs)) = (g2, Node (y:ys))
     (g1,y) = foldTree f g x
     (g2,Node ys) = foldTree f g1 (Node xs)
 
-insertUniop :: Op1 -> OMGraph -> Tree OMID -> TExp -> (OMGraph, Tree OMID)
-insertUniop op g ids ts = foldTree worker g (zipTreeWithTExp ids ts)
-  where
-    worker g0 (i,t) = (\(g',Leaf i',_) -> (g',i')) $ insertNode g0 (Uniop op i) t []
+-- insertUniop :: Op1 -> OMGraph -> Tree OMID -> TExp -> (OMGraph, Tree OMID)
+-- insertUniop op g ids ts = foldTree worker g (zipTreeWithTExp ids ts)
+--   where
+--     worker g0 (i,t) = (\(g',Leaf i',_) -> (g',i')) $ insertNode g0 (Uniop op i) t []
 
 -- |
 -- 二項演算のふるまい
@@ -435,12 +483,10 @@ insertBinop = undefined
 insertIf :: OMGraph -> Tree OMID -> Tree OMID -> Tree OMID -> TExp -> (OMGraph, Tree OMID)
 insertIf = undefined
 
--- storeResult :: OMGraph -> Tree OMID -> GlobalVariables -> Either String OMGraph
--- storeResult g ids vs = return $ foldl (\g0 (i,v) -> store i v g0) g $ zip (flatten ids) (map fst vs)
---   where
---     store i v g0 = (\(g',_,_) -> g') $ insertNode g0 (Store v i) (IdentT "void") []
 storeResult :: Tree OMID -> TransM ()
-storeResult = undefined
+storeResult ids = do
+  vs <- map fst <$> reader gVariables
+  zipWithM_ (\i v -> insertNode (Store v i) (IdentT "void") []) (flatten ids) vs
 
 isNumType :: TExp -> Bool
 isNumType (IdentT t)  = t `notElem` ["bool", "string"]
@@ -448,10 +494,12 @@ isNumType (TupleT _)  = False
 isNumType (GridT _ t) = isNumType t
 isNumType SomeType    = False
 
-isManifest :: IdentName -> TypeTable -> Bool
-isManifest n tbl = case HM.lookup n tbl of
-                     Just (ms,_) -> TMManifest `elem` ms
-                     Nothing     -> False
+isManifest :: MonadReader Env m => IdentName -> m Bool
+isManifest n = do
+  tbl <- reader typeTable
+  return $ case HM.lookup n tbl of
+    Just (ms,_) -> TMManifest `elem` ms
+    Nothing     -> False
 
 isExternFunc :: IdentName -> TypeTable -> Bool
 isExternFunc n tbl = case HM.lookup n tbl of
@@ -459,8 +507,10 @@ isExternFunc n tbl = case HM.lookup n tbl of
                       -- ^ FIXME: ほんとは型もチェックするべき
                        Nothing     -> False
 
-updateAnnots :: [Annot] -> (OMGraph,Tree OMID,TExp) -> (OMGraph,Tree OMID,TExp)
-updateAnnots as (g,ids,t) = (foldl' (\g0 i -> M.adjust (\n -> n { annot = as }) i g0) g ids,ids,t)
+updateAnnots :: MonadState OMGraph m => [Annot] -> Tree OMID -> m ()
+updateAnnots as ids = mapM_ addAnnots (flatten ids)
+  where
+    addAnnots i = modify' (\g -> M.adjust (\n -> n { annot = as }) i g)
 
 matchType :: TExp -> TExp -> Either String ()
 matchType t1 t2 | t1 == t2 = return ()
