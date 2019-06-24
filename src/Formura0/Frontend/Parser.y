@@ -5,7 +5,6 @@ module Formura0.Frontend.Parser where
 import Formura0.Frontend.ParserMonad
 import Formura0.Frontend.Lexer
 import Formura0.Syntax
-import Formura0.Vec
 }
 
 
@@ -103,7 +102,7 @@ exp0 : exp                                       { [Left $1] }
 exp : var                                        { Ident $1 }
     | function                                   { Ident "function" }
     | '(' tupleOfexp ')'                         { Tuple $2 }
-    | var '[' nPlusK ']'                         { Grid (Vec $3) (Ident $1) }
+    | var '[' nPlusK ']'                         { Grid $3 (Ident $1) }
 
 tupleOfexp : exp                                 { [$1] }
            | tupleOfexp ',' exp                  { $1 <> [$3] }
@@ -168,7 +167,7 @@ term : '(' rexp ')'                              { $2 }
      | int                                       { Imm' (toRational $1) }
      | float                                     { Imm' (toRational $1) }
      | tuple                                     { $1 }
-     | var '[' nPlusK ']'                        { Grid' (Vec $3) (Ident' $1) }
+     | var '[' nPlusK ']'                        { Grid' $3 (Ident' $1) }
 
 args :                                           { [] }
      | arg                                       { [$1] }

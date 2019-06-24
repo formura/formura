@@ -48,22 +48,22 @@ fixTExp (ModifiedType ms t) = ModifiedType ms <$> fixTExp' t
   where
     fixTExp' (Ident n)  = return $ IdentT n
     fixTExp' (Tuple xs) = TupleT <$> (mapM fixTExp' xs)
-    fixTExp' (Grid i e) = GridT <$> fixIndex i <*> (fixTExp' e)
+    fixTExp' (Grid i e) = GridT <$> fixIndexT i <*> (fixTExp' e)
     fixTExp' None       = return $ SomeType
 
-fixIndex :: Vec NPlusK -> Either String (Vec Rational)
-fixIndex (Vec npk) = Vec <$> mapM fixNpK npk
+fixIndexT :: [NPlusK] -> Either String (Vec Rational)
+fixIndexT npk = mapM fixNpK =<< fixIndexR npk
   where fixNpK (NPlusK "" x) = return x
         fixNpK _             = Left "invalid exp in grid type index"
 
 fixLExp :: Exp -> Either String LExp
 fixLExp (Ident n)  = return $ IdentL n
 fixLExp (Tuple xs) = TupleL <$> (mapM fixLExp xs)
-fixLExp (Grid i e) = GridL <$> fixIndex' i <*> fixLExp e
+fixLExp (Grid i e) = GridL <$> fixIndexL i <*> fixLExp e
 fixLExp None       = Left "invalid exp in LExp"
 
-fixIndex' :: Vec NPlusK -> Either String (Vec IdentName)
-fixIndex' (Vec npk) = Vec <$> mapM fixNpK npk
+fixIndexL :: [NPlusK] -> Either String (Vec IdentName)
+fixIndexL npk = mapM fixNpK =<< fixIndexR npk
   where fixNpK (NPlusK n x) | x == 0 = return n
         fixNpK _            = Left "invalid exp in LHS grid index"
 
@@ -71,13 +71,18 @@ fixRExp :: Exp' -> Either String RExp
 fixRExp (Ident' n)        = return $ IdentR n
 fixRExp (Imm' x)          = return $ ImmR x
 fixRExp (Tuple' xs)       = TupleR <$> mapM fixRExp xs
-fixRExp (Grid' i e)       = GridR i <$> fixRExp e
+fixRExp (Grid' i e)       = GridR <$> fixIndexR i <*> fixRExp e
 fixRExp (Uniop' op e)     = UniopR op <$> fixRExp e
 fixRExp (Binop' op e1 e2) = BinopR op <$> fixRExp e1 <*> fixRExp e2
 fixRExp (Let' xs e)       = LetR <$> fixStatements xs <*> fixRExp e
 fixRExp (Lambda' l r)     = LambdaR <$> fixLExp l <*> fixRExp r
 fixRExp (If' e1 e2 e3)    = IfR <$> fixRExp e1 <*> fixRExp e2 <*> fixRExp e3
 fixRExp (App' e1 e2)      = AppR <$> fixRExp e1 <*> fixRExp e2
+
+fixIndexR :: [NPlusK] -> Either String (Vec NPlusK)
+fixIndexR npk = return $ Vec (ZipList npk')
+  where
+    npk' = take 3 $ npk ++ replicate 3 (NPlusK "" 0)
 
 formatError :: AlexPosn -> Either String Statement -> Either String Statement
 formatError _ (Right s)  = Right s

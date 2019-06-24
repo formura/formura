@@ -22,14 +22,14 @@ type Statement = Decl TExp LExp RExp
 
 data Exp = Ident !IdentName
          | Tuple [Exp]
-         | Grid !(Vec NPlusK) Exp
+         | Grid ![NPlusK] Exp
          | None
   deriving (Eq,Show)
 
 data Exp' = Ident' !IdentName
           | Imm' !Rational
           | Tuple' [Exp']
-          | Grid' !(Vec NPlusK) Exp'
+          | Grid' ![NPlusK] Exp'
           | Uniop' !Op1 Exp'
           | Binop' !Op2 Exp' Exp'
           | Let' ![Statement0] Exp'

@@ -7,7 +7,6 @@ import Test.Hspec
 import Formura0.Frontend (parse)
 import Formura0.Frontend.Lexer
 import Formura0.Syntax
-import Formura0.Vec
 
 spec :: Spec
 spec = do
@@ -27,9 +26,9 @@ spec = do
     it "check type modifiers" $
       parse "extern function :: sqrt\nmanifest :: a = 1" `shouldBe` Right [TypeDecl (AlexPn 16 1 17) (ModifiedType [TMExtern] $ Ident "function") (Ident "sqrt"), TypeDecl (AlexPn 33 2 10) (ModifiedType [TMManifest] None) (Ident "a"), VarDecl (AlexPn 38 2 15) (Ident "a") (Imm' 1)]
     it "check a grid type" $
-      parse "double[] :: r = 0" `shouldBe` Right [TypeDecl (AlexPn 9 1 10) (ModifiedType [] (Grid (Vec []) (Ident "double"))) (Ident "r"), VarDecl (AlexPn 14 1 15) (Ident "r") (Imm' 0)]
+      parse "double[] :: r = 0" `shouldBe` Right [TypeDecl (AlexPn 9 1 10) (ModifiedType [] (Grid [] (Ident "double"))) (Ident "r"), VarDecl (AlexPn 14 1 15) (Ident "r") (Imm' 0)]
     it "check a grid value" $
-      parse "r[x] = r[x+1/2]" `shouldBe` Right [TypeDecl (AlexPn 5 1 6) (ModifiedType [] None) (Grid (Vec [NPlusK "x" 0]) (Ident "r")), VarDecl (AlexPn 5 1 6) (Grid (Vec [NPlusK "x" 0]) (Ident "r")) (Grid' (Vec [NPlusK "x" (1/2)]) (Ident' "r"))]
+      parse "r[x] = r[x+1/2]" `shouldBe` Right [TypeDecl (AlexPn 5 1 6) (ModifiedType [] None) (Grid [NPlusK "x" 0] (Ident "r")), VarDecl (AlexPn 5 1 6) (Grid [NPlusK "x" 0] (Ident "r")) (Grid' [NPlusK "x" (1/2)] (Ident' "r"))]
 
     it "check arithmetic expressions" $
       parse "y = -4*x**2 + a*x - 3/2\nz = +(a,b) + (3*(1,2))" `shouldBe`
