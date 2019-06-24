@@ -301,6 +301,10 @@ trans t (IdentR n) = do
     (ids,t1) <- transValue t v
     updateAnnots as ids
     return (ids,t1)
+trans t (ImmR x) =
+  if not (isNumType t)
+     then reportError $ "invalid type: " ++ show x ++ " is not " ++ show t
+     else insertNode (Imm x) t []
 
 transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree OMID, TExp)
 transValue t0 (p,idx,v) =
