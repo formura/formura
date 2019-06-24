@@ -1,17 +1,24 @@
+{-# LANGUAGE BangPatterns      #-}
+{-# LANGUAGE DeriveFunctor     #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Formura0.Middleend.Translate where
 
+import           Control.Applicative
+import           Control.Monad
 import           Data.Bifunctor (bimap)
 import qualified Data.HashMap.Lazy as HM
+import           Data.List
 import qualified Data.Map as M
+import           Data.Ratio
 import qualified Data.Text as T
-import           Data.Tree
 
 import Formura.NumericalConfig
+import Formura0.Annotation
 import Formura0.Frontend.Lexer (AlexPosn)
 import Formura0.OMGraph
 import Formura0.Syntax
 import Formura0.Utils
+import Formura0.Vec
 
 -- | * 概要
 -- AST である Program から OMGraph を生成する
@@ -20,8 +27,25 @@ import Formura0.Utils
 -- Formura0.Middleend.Translate.Bridge
 -- で旧実装に変換して、さらに後ろの処理へ流す
 
-type IdentTable = HM.HashMap IdentName (AlexPosn, RExp)
+data Value = ValueR RExp
+           | ValueI !Int
+           | ValueN (Tree OMID) TExp
+
+type IdentTable = HM.HashMap IdentName (AlexPosn, [IdentName], Value)
 type TypeTable = HM.HashMap IdentName ([TypeModifier],TExp)
+
+data Tree a = Leaf !a
+            | Node [Tree a]
+  deriving (Eq,Show,Functor)
+
+instance Foldable Tree where
+  foldr f acc (Leaf x)      = f x acc
+  foldr _ acc (Node [])     = acc
+  foldr f acc (Node (x:xs)) = foldr f (foldr f acc x) (Node xs)
+
+flatten :: Tree a -> [a]
+flatten (Leaf a)  = [a]
+flatten (Node ts) = concatMap flatten ts
 
 -- |
 -- genOMProgram の仕様
@@ -71,11 +95,11 @@ calcSleeve :: OMGraph -> Int
 calcSleeve = undefined
 
 makeIdentTable :: Program -> Either String IdentTable
-makeIdentTable prog = return $ HM.fromList [ (n,(p,e)) | VarDecl p l r <- prog, (n,e) <- unwrap l r]
+makeIdentTable prog = return $ HM.fromList [ (n,(p,idx,ValueR e)) | VarDecl p l r <- prog, (n,!idx,e) <- unwrap l r]
   where
     unwrap (TupleL xs) r = concat [unwrap x (AppR r (ImmR i)) | (x,i) <- zip xs [0..]]
-    unwrap (IdentL n) r  = [(n,r)]
-    unwrap (GridL _ l) r = unwrap l r
+    unwrap (IdentL n) r  = [(n,[],r)]
+    unwrap (GridL (Vec (ZipList idx)) l) r = [(n,idx++idx',r') | (n,idx',r') <- unwrap l r]
 
 makeTypeTable :: Program -> Either String TypeTable
 makeTypeTable prog = return $ HM.fromList [ (n,(ms,t')) | (TypeDecl _ (ModifiedType ms t) l) <- prog, (n,t') <- unwrap l t]
@@ -95,7 +119,7 @@ findGlobalVariables :: IdentTable -> Either String [(IdentName,TExp)]
 findGlobalVariables tbl =
   case HM.lookup "init" tbl of
     Nothing              -> Left "Error: Not found init function"
-    Just (p,LambdaR _ r) ->
+    Just (p,_,ValueR (LambdaR _ r)) ->
       case r of
         (LetR b (IdentR x)) -> do
           tt <- makeTypeTable b
@@ -107,7 +131,7 @@ findGlobalVariables tbl =
           ts <- sequence [typeOf x tt | x <- xs']
           return $ zip xs' ts
         _ -> Left $ "Error: " ++ formatPos p ++ " init must return a tuple of grid"
-    Just (p,_)           -> Left $ "Error:" ++ formatPos p ++ " init must be a function"
+    Just (p,_,_)           -> Left $ "Error:" ++ formatPos p ++ " init must be a function"
   where
     unwrap xs = case [n | (IdentR n) <- xs] of
                   ys | length ys == length xs -> Right ys
@@ -154,10 +178,7 @@ buildGraph iTbl tTbl vs name = do
     Nothing -> Left $ "Not found " ++ show (T.unpack name) ++ " function"
 
 buildGraph' :: IdentTable -> TypeTable -> GlobalVariables -> IdentName -> Either String (Maybe OMGraph)
-buildGraph' iTbl tTbl vs name = sequence $ translate iTbl tTbl vs <$> lookupGlobalFunction iTbl name
-
-lookupGlobalFunction :: IdentTable -> IdentName -> Maybe RExp
-lookupGlobalFunction tbl name = snd <$> HM.lookup name tbl
+buildGraph' iTbl tTbl vs name = sequence $ translate iTbl tTbl vs . (\(p,_,ValueR r) -> (p,r)) <$> HM.lookup name iTbl
 
 -- |
 -- 計算グラフ構築の仕様
@@ -190,12 +211,12 @@ lookupGlobalFunction tbl name = snd <$> HM.lookup name tbl
 -- - グローバル変数の load と store
 --
 
-translate :: IdentTable -> TypeTable -> GlobalVariables -> RExp -> Either String OMGraph
-translate iTbl tTbl vs (LambdaR args (LetR b xs)) = do
+translate :: IdentTable -> TypeTable -> GlobalVariables -> (AlexPosn,RExp) -> Either String OMGraph
+translate iTbl tTbl vs (p,LambdaR args (LetR b xs)) = do
   typecheck vs args xs
   iTbl' <- makeIdentTable b
   tTbl' <- makeTypeTable b
-  (g,ids,_) <- trans (iTbl <> iTbl') (tTbl <> tTbl') vs xs
+  (g,ids,_) <- trans (iTbl <> iTbl') (tTbl <> tTbl') vs M.empty (TupleT $ map snd vs) p xs
   storeResult g ids vs
 translate _ _ _ _                      = Left "Not a function"
 
@@ -206,81 +227,216 @@ typecheck vs (TupleL ls) (TupleR rs) = if n == length ls && n == length rs then 
   where n = length vs
 typecheck _ _ _ = Left "must be a tuple to tuple function"
 
-trans :: IdentTable -> TypeTable -> GlobalVariables -> RExp -> Either String (OMGraph, Tree OMID, TExp)
-trans iTbl tTbl vs r = undefined
+insertNode :: OMGraph -> OMInst -> TExp -> [Annot] -> (OMGraph, Tree OMID, TExp)
+insertNode g i t as = (M.insert omid node g,Leaf omid,t)
+  where
+    omid = M.size g
+    node = OMNode { inst = i
+                  , theType = t
+                  , annot = as
+                  }
+
+-- |
+-- 型チェックの扱い
+-- - 本来はもっとはやい段階で型チェックを行い、ここでは不要のはずである
+-- - TypeTable を構築するときに、できるだけ型チェックを完了したい
+-- - 結局 OMGraph において各 Node の型情報が必要なので、まとめてやったほうが楽...?
+--
+-- formura の型付けアルゴリズム (案)
+-- - グローバル関数ごとに型付けを行う
+-- - 少なくとも、グローバル関数の型はわかっているとする
+-- - 基本的には、trans を同じように関数の返り値から構文木をたどっていく
+-- - そうすると、順に各項に対して期待する型がわかる
+-- - このとき各項の実際の型と比較して一致していれば、型を確定して次へいく
+-- - 実際の型が SomeType だったときは、期待する型が許容できるなら期待する型で確定する
+--   - 許容できるとは、 (ImmR 1.0) という項に対して (IdentT "double") を期待する場合
+--   - 許容できないとは、 (ImmR 1.0) という項に対して (IdentT "bool") を期待する場合
+--   - これは破綻している気がする; つまり、 (ImmR x) に対して許容できる型が判明していない。数値リテラルに対する型付けをどうすればよいか不明。 明らかに許容できない型は拒否するという方針でよいのでは... (たとえば、 `TupleT xs` や `IdentT "bool"` など)
+--
+--
+trans :: IdentTable -> TypeTable -> GlobalVariables -> OMGraph -> TExp -> AlexPosn -> RExp -> Either String (OMGraph, Tree OMID, TExp)
+trans !iTbl !tTbl vs !g t _ (IdentR n)
+  | n `elem` (map fst vs) = do
+    let Just t' = lookup n vs
+    return (insertNode g (LoadGlobal (vec [0,0,0]) n) t' [SourceName n])
+  | otherwise = do
+    (p,idx,v) <- lookupIdent n iTbl
+    let as = if n `isManifest` tTbl then [SourceName n,ManifestNode] else [SourceName n]
+    updateAnnots as <$>
+      case v of
+        ValueR r -> let iTbl' = HM.fromList [(i,(p,[],ValueI x)) | (i,x) <- zip idx [0..]]
+                    in trans (iTbl <> iTbl') tTbl vs g t p r
+        ValueN ids t1 -> return (g,ids,t1)
+        ValueI i -> return $ insertNode g (LoadIndex i) (IdentT "int") []
+trans !iTbl !tTbl vs !g t p (ImmR x) =
+  if not (isNumType t)
+    then Left $ "invalid type: " ++ show x ++ " is not " ++ show t
+    else return (insertNode g (Imm x) t [])
+trans !iTbl !tTbl vs !g t p (TupleR xs)       =
+  case t of
+    TupleT ts -> transTuple iTbl tTbl vs g p (zip ts xs)
+    SomeType -> transTuple iTbl tTbl vs g p (map (\x -> (SomeType,x)) xs)
+    _ -> Left $ "invalid type: " ++ show (TupleR xs) ++ " is not " ++ show t
+trans !iTbl !tTbl vs !g t p (GridR idx r)     = do
+  (g1,ids1,t1) <- trans iTbl tTbl vs g t p r
+  case t1 of
+    (IdentT _)     -> return (g1,ids1,t1)
+    (GridT off t') -> do
+      let newPos = (-) <$> off <*> (fmap (\(NPlusK _ x) -> x) idx)
+          intOff = fmap floor newPos
+          newOff = (-) <$> newPos <*> (fmap fromIntegral intOff)
+          t2 = GridT newOff t'
+      if intOff == (pure [0,0,0])
+         then return (g1,ids1,t1)
+         else insertNode g1 (Load (fmap negate intOff) ids1) t1 []
+    (TupleT ts)    -> undefined
+trans !iTbl !tTbl vs !g t p (UniopR op r)     = do
+  -- TODO: 型のチェック
+  (g1,ids1,t1) <- trans iTbl tTbl vs g t p r
+  let (g2,ids2) = insertUniop op g1 ids1 t1
+  return (g2,ids2,t1)
+trans !iTbl !tTbl vs !g t p (BinopR op r1 r2) = do
+  -- TODO: 型のキャスト
+  (g1,ids1,t1) <- trans iTbl tTbl vs g t p r1
+  (g2,ids2,t2) <- trans iTbl tTbl vs g1 t p r2
+  matchType t1 t2 -- スカラーの拡張に対応できていない
+  let (g3,ids3,t3) = insertBinop op g2 ids1 ids2 t1
+  return (g3,ids3,t3)
+trans !iTbl !tTbl vs !g t p (LetR b r)        = do
+  iTbl' <- makeIdentTable b
+  tTbl' <- makeTypeTable b
+  trans (iTbl <> iTbl') (tTbl <> tTbl') vs g t p r
+trans !iTbl !tTbl vs !g t p (LambdaR args r)  = Left "error"
+trans !iTbl !tTbl vs !g t p (IfR cnd r1 r2)   = do
+  -- TODO: 型のキャスト
+  (g1,ids1,t1) <- trans iTbl tTbl vs g (IdentT "bool") p cnd
+  (g2,ids2,t2) <- trans iTbl tTbl vs g1 t p r1
+  (g3,ids3,t3) <- trans iTbl tTbl vs g2 t p r2
+  matchType t1 (IdentT "bool") -- 正しいふるまいではない
+  matchType t2 t3
+  let (g4,ids4) = insertIf g3 ids1 ids2 ids3 t2
+  return (g4,ids4,t2)
+trans !iTbl !tTbl vs !g t p (AppR r1 r2)      = do
+-- r1 として許容できるのは
+-- - IdentR
+-- - LambdaR
+-- - TupleR
+-- のいずれか
+--
+--
+-- 次のようなものは許容しない (v2.3 でも許容していない)
+-- f = if ... then fun(x) ... else fun(x) ...
+-- q = f a
+  case r1 of
+    -- TODO: 外部関数への対応
+    IdentR n    | n `isExternFunc` tTbl -> undefined
+                | otherwise -> do
+      (p1,_,r) <- lookupIdent n iTbl
+      case r of
+        ValueR r'     -> trans iTbl tTbl vs g t p1 (AppR r' r2)
+        ValueN (Node ids) (TupleT ts) -> do
+          i <- evalToInt r2 iTbl
+          if i >= 0 && i < length ts then return (g,ids !! i,ts !! i) else Left "tuple indexing is too large"
+        _      -> Left $ "error: " ++ show (T.unpack n) ++ "is not appliable"
+    TupleR xs   -> evalToInt r2 iTbl >>= (\i -> if i >= 0 && i < length xs then trans iTbl tTbl vs g t p (xs !! i) else Left "tuple indexing is too large")
+    LambdaR l r -> do
+      (g1,ids1,t1) <- trans iTbl tTbl vs g t p r2
+      iTbl' <- bindArgs p l ids1
+      trans (iTbl <> iTbl') tTbl vs g t p r
+    _ -> Left $ "error: " ++ show r1 ++ "is not appliable"
+
+lookupIdent :: IdentName -> IdentTable -> Either String (AlexPosn, [IdentName], Value)
+lookupIdent n tbl = case HM.lookup n tbl of
+                      Nothing -> Left $ "Not found the identifier " ++ show (T.unpack n)
+                      Just x -> return x
+
+evalToInt :: RExp -> IdentTable -> Either String Int
+evalToInt (ImmR n) _ = if denominator n == 1 then return (fromInteger $ numerator n) else Left "non-integer indexing in tuple access"
+evalToInt (IdentR n) tbl = do
+  (_,_,v) <- lookupIdent n tbl
+  case v of
+    ValueR r -> evalToInt r tbl
+    _        -> Left ""
+evalToInt r _ = Left $ show r ++ " is not integer"
+
+bindArgs :: AlexPosn -> LExp -> Tree OMID -> Either String IdentTable
+bindArgs p (TupleL ls) (Node ids) | length ls == length ids = undefined
+bindArgs _ _ _                    = Left "tuple length mismatch"
+
+transTuple :: IdentTable -> TypeTable -> GlobalVariables -> OMGraph -> AlexPosn -> [(TExp,RExp)] -> Either String (OMGraph, Tree OMID, TExp)
+transTuple iTbl tTbl vs g p xs = (\(g0,ids,ts) -> (g0,Node ids,TupleT ts)) <$> foldM worker (g,[],[]) xs
+  where
+    worker (g0,ids,ts) (t,r) = do
+      (g1,i1,t1) <- trans iTbl tTbl vs g0 t p r
+      return (g1,ids <> [i1], ts <> [t1])
+
+zipTreeWithTExp :: Tree a -> TExp -> Tree (a,TExp)
+zipTreeWithTExp (Leaf x) t = Leaf (x,t)
+zipTreeWithTExp (Node xs) (TupleT ts) = Node [zipTreeWithTExp x t | (x,t) <- zip xs ts]
+zipTreeWithTExp _ _ = error "error at Formura0.Middleend.Translate.zipTreeWithTExp"
+
+foldTree :: (g -> a -> (g,b)) -> g -> Tree a -> (g, Tree b)
+foldTree f g (Leaf x)      = Leaf <$> f g x
+foldTree _ g (Node [])     = (g,Node [])
+foldTree f g (Node (x:xs)) = (g2, Node (y:ys))
+  where
+    (g1,y) = foldTree f g x
+    (g2,Node ys) = foldTree f g1 (Node xs)
+
+insertUniop :: Op1 -> OMGraph -> Tree OMID -> TExp -> (OMGraph, Tree OMID)
+insertUniop op g ids ts = foldTree worker g (zipTreeWithTExp ids ts)
+  where
+    worker g0 (i,t) = (\(g',Leaf i',_) -> (g',i')) $ insertNode g0 (Uniop op i) t []
+
+-- |
+-- 二項演算のふるまい
+-- (a,b) + (c,d) => (a+c,b+d)
+-- a + (b,c) => (a+b,a+c)
+-- (a,b) + c => (a+c,b+c)
+--
+insertBinop :: Op2 -> OMGraph -> Tree OMID -> Tree OMID -> TExp -> (OMGraph, Tree OMID, TExp)
+insertBinop = undefined
+
+-- |
+-- 現在 (v2.3) の振る舞いでは
+-- if (a,b) == (1,2) then (0,10) else (1,11)
+-- が
+-- (if a == 1 then 0 else 1, if b == 2 then 10 else 11)
+-- と同値になる
+--
+-- また
+-- if a == 1 then (0,10) else (1,11)
+-- が
+-- (if a == 1 then 0 else 1, if a == 1 then 10 else 11)
+-- と同値になる
+--
+insertIf :: OMGraph -> Tree OMID -> Tree OMID -> Tree OMID -> TExp -> (OMGraph, Tree OMID)
+insertIf = undefined
 
 storeResult :: OMGraph -> Tree OMID -> GlobalVariables -> Either String OMGraph
 storeResult g ids vs = return $ foldl (\g0 (i,v) -> store i v g0) g $ zip (flatten ids) (map fst vs)
   where
-    store i v g0 = let i' = M.size g0
-                       node = OMNode { inst = Store v i
-                                     , theType = IdentT "void"
-                                     , annot = []
-                                     }
-                    in M.insert i' node g0
+    store i v g0 = (\(g',_,_) -> g') $ insertNode g0 (Store v i) (IdentT "void") []
 
--- |
--- trans の仕様
--- IdentTable を参照しながら、 RExp を評価して OMGraph に挿入していく
---
--- Annotation の扱いに注意
--- - 外部関数
--- - Manifest 変数
---
--- trans :: IdentTable -> RExp -> Either String OMGraph
--- trans tbl r = (\(a,_,_) -> a) <$> go M.empty r
---   where
-    -- FIXME:
-    -- - GlobalVariables の扱いを考えなおす (initGraph での構築ではダメでは...)
-    -- - LetR や AppR を考えると IdentTable も go がもちまわる必要がある
-    -- - TupleR を考えると [OMID] でないとダメでは...
-    -- go :: OMGraph -> RExp -> Either String (OMGraph, [OMID], TExp)
-    -- go g0 (ImmR x) = let i = M.size g0
-    --                      t = IdentT "double"
-    --                      node = OMNode { inst = Imm x
-    --                                    , theType = t
-    --                                    , annot = []
-    --                                    }
-    --                      g = M.insert i node g0
-    --                   in return (g,[i],t)
-    -- go g0 (IdentR n) = case HM.lookup n tbl of
-    --                      Nothing -> Left $ "Not found the identifier " ++ show (T.unpack n)
-    --                      Just (_,r) -> go g0 r
-    -- go g0 (TupleR rs) = undefined
-    -- go g0 (UniopR op r) = do
-    --   (g,i,t) <- go g0 r
-    --   let i' = M.size g
-    --       node = OMNode { inst = Uniop op i
-    --                     , theType = t
-    --                     , annot = []
-    --                     }
-    --       g' = M.insert i' node g
-    --   return (g',i',t)
-    -- go g0 (BinopR op r1 r2) = do
-    --   (g1,i1,t1) <- go g0 r1
-    --   (g2,i2,t2) <- go g1 r2
-    --   matchType t1 t2
-    --   let i = M.size g2
-    --       t = inferType op t1
-    --       node = OMNode { inst = Binop op i1 i2
-    --                     , theType = t
-    --                     , annot = []
-    --                     }
-    --       g' = M.insert i node g2
-    --   return (g',i,t)
-    -- go g0 (IfR cond r1 r2) = do
-    --   (g1,i1,t1) <- go g0 cond
-    --   (g2,i2,t2) <- go g1 r1
-    --   (g3,i3,t3) <- go g2 r2
-    --   matchType t1 (IdentT "bool")
-    --   matchType t2 t3
-    --   let i = M.size g3
-    --       node = OMNode { inst = If i1 i2 i3
-    --                     , theType = t2
-    --                     , annot = []
-    --                     }
-    --       g' = M.insert i node g3
-    --   return (g',i,t2)
+isNumType :: TExp -> Bool
+isNumType (IdentT t)  = t `notElem` ["bool", "string"]
+isNumType (TupleT _)  = False
+isNumType (GridT _ t) = isNumType t
+isNumType SomeType    = False
+
+isManifest :: IdentName -> TypeTable -> Bool
+isManifest n tbl = case HM.lookup n tbl of
+                     Just (ms,_) -> TMManifest `elem` ms
+                     Nothing     -> False
+
+isExternFunc :: IdentName -> TypeTable -> Bool
+isExternFunc n tbl = case HM.lookup n tbl of
+                       Just (ms,_) -> TMExtern `elem` ms
+                      -- ^ FIXME: ほんとは型もチェックするべき
+                       Nothing     -> False
+
+updateAnnots :: [Annot] -> (OMGraph,Tree OMID,TExp) -> (OMGraph,Tree OMID,TExp)
+updateAnnots as (g,ids,t) = (foldl' (\g0 i -> M.adjust (\n -> n { annot = as }) i g0) g ids,ids,t)
 
 matchType :: TExp -> TExp -> Either String ()
 matchType t1 t2 | t1 == t2 = return ()
