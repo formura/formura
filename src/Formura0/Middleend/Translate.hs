@@ -35,8 +35,11 @@ import Formura0.Vec
 -- で旧実装に変換して、さらに後ろの処理へ流す
 
 data Value = ValueR RExp
+           -- ^ グルーバルな変数定義やローカルな変数定義の識別子の値
            | ValueI !Int
-           | ValueN (Tree OMID) TExp
+           -- ^ グリッド型の識別子の値
+           | ValueN (Tree (OMID,TExp))
+           -- ^ 関数の仮引数の識別子の値
   deriving (Eq,Show)
 
 -- [IdentName] はグリッドのインデックス
@@ -272,8 +275,8 @@ translate iTbl tTbl vs (p,LambdaR args (LetR b xs)) = do
   -- (g,ids,_) <- trans (iTbl <> iTbl') (tTbl <> tTbl') vs M.empty (TupleT $ map snd vs) p xs
   -- storeResult g ids vs
   run (iTbl' |+> iTbl) (tTbl' |+> tTbl) vs p $ do
-    (ids,_) <- trans (TupleT $ map snd vs) xs
-    storeResult ids
+    res <- trans (TupleT $ map snd vs) xs
+    storeResult res
 translate _ _ _ _                      = Left "Not a function"
 
 -- |
@@ -283,7 +286,7 @@ typecheck vs (TupleL ls) (TupleR rs) = if n == length ls && n == length rs then 
   where n = length vs
 typecheck _ _ _ = Left "must be a tuple to tuple function"
 
-insertNode :: MonadState OMGraph m => OMInst -> TExp -> [Annot] -> m (Tree OMID, TExp)
+insertNode :: MonadState OMGraph m => OMInst -> TExp -> [Annot] -> m (Tree (OMID, TExp))
 insertNode i t as = do
   g <- get
   let omid = M.size g
@@ -292,37 +295,36 @@ insertNode i t as = do
                     , annot = as
                     }
   put $! M.insert omid node g
-  return (Leaf omid, t)
+  return $ Leaf (omid, t)
 
 
-trans :: TExp -> RExp -> TransM (Tree OMID, TExp)
+trans :: TExp -> RExp -> TransM (Tree (OMID, TExp))
 trans t (IdentR n) = do
   whenGlobal n (\t' -> insertNode (LoadGlobal (vec [0,0,0]) n) t' [SourceName n]) $ do
     v <- lookupIdent n
     b <- isManifest n
     let as = if b then [SourceName n, ManifestNode] else [SourceName n]
-    (ids,t1) <- transValue t v
-    updateAnnots as ids
-    return (ids,t1)
+    res <- transValue t v
+    updateAnnots as res
+    return res
 trans t (ImmR x) =
   if not (isNumType t)
      then reportError $ "invalid type: " ++ show x ++ " is not " ++ show t
      else insertNode (Imm x) t []
 trans t (TupleR xs) =
-  unzipTree <$> case t of
+  Node <$> case t of
     TupleT ts | length xs == length ts -> zipWithM trans ts xs
     SomeType -> mapM (trans SomeType) xs
     _ -> reportError $ "invalid type: " ++ show (TupleR xs) ++ " is not " ++ show t
-trans t (GridR idx r) = do
-  (ids,t1) <- trans t r
-  transGrid idx ids t1
+trans t (GridR idx r) = trans t r >>= transGrid idx
+trans t (UniopR op r) = trans t r >>= transUniop op
 
-transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree OMID, TExp)
+transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
 transValue t0 (p,idx,v) =
   case v of
-    ValueR r     -> local (updateEnv p idx) $ trans t0 r
-    ValueN ids t -> return (ids,t)
-    ValueI i     -> insertNode (LoadIndex i) (IdentT "int") []
+    ValueR r  -> local (updateEnv p idx) $ trans t0 r
+    ValueN xs -> return xs
+    ValueI i  -> insertNode (LoadIndex i) (IdentT "int") []
 
   where
     updateEnv p1 ns e = let iTbl = HM.fromList [(n,(p1,[],ValueI x)) | (n,x) <- zip ns [0..]]
@@ -330,24 +332,23 @@ transValue t0 (p,idx,v) =
                              , sourcePos = p1
                              }
 
-transGrid :: Vec NPlusK -> Tree OMID -> TExp -> TransM (Tree OMID, TExp)
-transGrid npk ids t =
+transGrid :: Vec NPlusK -> Tree (OMID,TExp) -> TransM (Tree (OMID,TExp))
+transGrid npk res@(Leaf (i,t)) =
   case t of
-    IdentT _ -> return (ids,t)
+    IdentT _ -> return res
     GridT off t' -> do
       let newPos = (-) <$> off <*> (fmap (\(NPlusK _ x) -> x) npk)
           intOff = fmap floor newPos
           newOff = (-) <$> newPos <*> (fmap fromIntegral intOff)
           t1 = GridT newOff t'
       if intOff == (vec [0,0,0])
-         then return (ids,t1)
-         else case ids of
-                Leaf i -> insertNode (Load (fmap negate intOff) i) t1 []
-                _      -> reportError $ "bug in transGrid"
-    TupleT ts -> case ids of
-                   Node xs | length xs == length ts -> unzipTree <$> zipWithM (\i t0 -> transGrid npk i t0) xs ts
-                   _ -> reportError "bug in transGrid"
-    SomeType -> reportError "something wrong in transGrid"
+         then return $ Leaf (i,t1)
+         else insertNode (Load (fmap negate intOff) i) t1 []
+    _ -> reportError "bug in transGrid"
+transGrid npk (Node xs) = Node <$> mapM (transGrid npk) xs
+
+transUniop :: Op1 -> Tree (OMID,TExp) -> TransM (Tree (OMID,TExp))
+transUniop op res = undefined
 
 whenGlobal :: IdentName -> (TExp -> TransM a) -> TransM a -> TransM a
 whenGlobal n act1 act2 = do
@@ -517,10 +518,10 @@ insertBinop = undefined
 insertIf :: OMGraph -> Tree OMID -> Tree OMID -> Tree OMID -> TExp -> (OMGraph, Tree OMID)
 insertIf = undefined
 
-storeResult :: Tree OMID -> TransM ()
-storeResult ids = do
+storeResult :: Tree (OMID,TExp) -> TransM ()
+storeResult res = do
   vs <- map fst <$> reader gVariables
-  zipWithM_ (\i v -> insertNode (Store v i) (IdentT "void") []) (flatten ids) vs
+  zipWithM_ (\(i,_) v -> insertNode (Store v i) (IdentT "void") []) (flatten res) vs
 
 isNumType :: TExp -> Bool
 isNumType (IdentT t)  = t `notElem` ["bool", "string"]
@@ -541,10 +542,10 @@ isExternFunc n tbl = case HM.lookup n tbl of
                       -- ^ FIXME: ほんとは型もチェックするべき
                        Nothing     -> False
 
-updateAnnots :: MonadState OMGraph m => [Annot] -> Tree OMID -> m ()
+updateAnnots :: MonadState OMGraph m => [Annot] -> Tree (OMID,TExp) -> m ()
 updateAnnots as ids = mapM_ addAnnots (flatten ids)
   where
-    addAnnots i = modify' (\g -> M.adjust (\n -> n { annot = as }) i g)
+    addAnnots (i,_) = modify' (\g -> M.adjust (\n -> n { annot = as }) i g)
 
 matchType :: TExp -> TExp -> Either String ()
 matchType t1 t2 | t1 == t2 = return ()
