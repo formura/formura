@@ -16,6 +16,7 @@ module Formura0.Frontend
 -- それぞれ、サブモジュールに分割し実装する
 
 import Control.Monad
+import Control.Applicative
 import System.Exit
 
 import Formura0.Frontend.Lexer
