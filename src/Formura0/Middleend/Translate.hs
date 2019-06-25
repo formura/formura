@@ -324,6 +324,19 @@ trans t (LetR b r) = do
   tTbl <- makeTypeTable b
   local (\e -> e { identTable = iTbl |+> identTable e, typeTable = tTbl |+> typeTable e })  $ trans t r
 trans t r@(LambdaR _ _) = reportError $ "invalid value: " ++ show r ++ " is a function"
+trans t (IfR r1 r2 r3) = do
+  -- if の仕様
+  --
+  -- if x then a1 else a2
+  -- このとき、 a1 と a2 の型は一致していなければならない
+  -- x は、 IdentT "bool" 型か a1、a2 と同じ形のタプルでなければならない
+  -- この振る舞いは、バックトレースで実装できる
+  x2 <- trans t r2
+  x3 <- trans t r3
+  -- FIXME: 適切な名前をつける
+  res <- zipWithTreeM (\(i2,t2) (i3,t3) -> if t2 == t3 then return ((i2,i3),t2) else reportError $ "type mismatch: " ++ show t2 ++ " /= " ++ show t3 ) x2 x3
+  x1 <- transCond r1 (mapTExp (const "bool") $ treeToTExp $ fmap (\(_,t0) -> t0) res)
+  zipWithTreeM (\(i1,t1) ((i2,i3),t2) -> if isBoolishType t1 then insertNode (If i1 i2 i3) t2 [] else reportError $ "type mismatch: " ++ show t1 ++ " is not boolish type") x1 res
 
 transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
 transValue t0 (p,idx,v) =
@@ -365,12 +378,35 @@ transBinop op x1@(Leaf _) (Node xs2) = Node <$> mapM (\x2 -> transBinop op x1 x2
 transBinop op (Node xs1) (Node xs2) | length xs1 == length xs2 = Node <$> zipWithM (transBinop op) xs1 xs2
                                     | otherwise = reportError $ "tuple length mismatch"
 
+transCond :: RExp -> TExp -> TransM (Tree (OMID,TExp))
+transCond r (IdentT "bool") = trans (IdentT "bool") r
+transCond r t = do
+  g0 <- get
+  trans (IdentT "bool") r `catchError` (\_ -> put g0 >> trans t r)
+
 whenGlobal :: IdentName -> (TExp -> TransM a) -> TransM a -> TransM a
 whenGlobal n act1 act2 = do
   vs <- reader gVariables
   if n `elem` (map fst vs)
      then act1 (fromJust $ lookup n vs)
      else act2
+
+zipWithTreeM :: MonadError TransError m => (a -> b -> m c) -> Tree a -> Tree b -> m (Tree c)
+zipWithTreeM f (Leaf x) (Leaf y)    = Leaf <$> f x y
+zipWithTreeM f x@(Leaf _) (Node ys) = Node <$> mapM (\y -> zipWithTreeM f x y) ys
+zipWithTreeM f (Node xs) y@(Leaf _) = Node <$> mapM (\x -> zipWithTreeM f x y) xs
+zipWithTreeM f (Node xs) (Node ys) | length xs == length ys = Node <$> zipWithM (zipWithTreeM f) xs ys
+                                   | otherwise = throwError "tree mismatch"
+
+treeToTExp :: Tree TExp -> TExp
+treeToTExp (Leaf t)  = t
+treeToTExp (Node ts) = TupleT $ map treeToTExp ts
+
+mapTExp :: (IdentName -> IdentName) -> TExp -> TExp
+mapTExp f (IdentT n)    = IdentT (f n)
+mapTExp f (TupleT ts)   = TupleT $ map (mapTExp f) ts
+mapTExp f (GridT npk t) = GridT npk (mapTExp f t)
+mapTExp _ SomeType      = SomeType
 
 --trans :: IdentTable -> TypeTable -> GlobalVariables -> OMGraph -> TExp -> AlexPosn -> RExp -> Either String (OMGraph, Tree OMID, TExp)
 --trans !iTbl !tTbl vs !g t _ (IdentR n)
@@ -543,6 +579,12 @@ isNumType (IdentT t)  = t `notElem` ["bool", "string"]
 isNumType (TupleT _)  = False
 isNumType (GridT _ t) = isNumType t
 isNumType SomeType    = False
+
+isBoolishType :: TExp -> Bool
+isBoolishType (IdentT t)  = t == "bool"
+isBoolishType (TupleT _)  = False
+isBoolishType (GridT _ t) = isBoolishType t
+isBoolishType SomeType    = False
 
 isManifest :: MonadReader Env m => IdentName -> m Bool
 isManifest n = do
