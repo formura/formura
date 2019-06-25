@@ -278,8 +278,10 @@ translate _ _ _ _                      = Left "Not a function"
 
 -- |
 -- typecheck は、グローバル関数の引数と返り値の数がグローバル変数と一致するか調べる
-typecheck :: GlobalVariables -> LExp -> RExp -> Either String ()
-typecheck vs (TupleL ls) (TupleR rs) = if n == length ls && n == length rs then return () else Left "mismatch the length of tuples"
+--
+-- FIXME: init 関数に対して正しく動作しない
+typecheck :: GlobalVariables -> [LExp] -> RExp -> Either String ()
+typecheck vs ls (TupleR rs) = if n == length ls && n == length rs then return () else Left "mismatch the length of tuples"
   where n = length vs
 typecheck _ _ _ = Left "must be a tuple to tuple function"
 
@@ -295,15 +297,35 @@ insertNode i t as = do
   return $ (omid, t)
 
 
+-- |
+-- trans の仕様
+--
+-- trans は構文木をたどり OMGraph を構築する
+--
+-- OMGraph は、グローバル変数と即値からはじまり、グローバル変数でおわる。
+-- trans は、結果のグローバル変数から構文木をたどっていき、最終的にはグローバル変数か即値にいきつく。
+-- trans は次のような仕事を行う。
+-- - 型チェック
+-- - タプルの展開
+-- - 関数の展開 (インライン化)
+--
+-- trans の第一引数は、期待する型である。
+-- これは、タプルの展開と即値の型を決定するのに使う。
+-- trans の返り値にある TExp は決定されたノードの型である。
+-- 期待する型には SomeType が含まれるが、決定されたノードの型には SomeType は含まれない。
+-- また、Tree a 型がタプルの構造を保存するため、決定されたノード型は IdentT か GridT である (はず)。
 trans :: TExp -> RExp -> TransM (Tree (OMID, TExp))
 trans t (IdentR n) = do
   whenGlobal n (\t' -> Leaf <$> insertNode (LoadGlobal (vec [0,0,0]) n) t' [SourceName n]) $ do
     v <- lookupIdent n
+    t' <- lookupType n
+    t0 <- expectType t t'
+    res <- transValue t0 v
     b <- isManifest n
     let as = if b then [SourceName n, ManifestNode] else [SourceName n]
-    res <- transValue t v
     updateAnnots as res
     return res
+trans SomeType (ImmR x) = Leaf <$> insertNode (Imm x) (if denominator x == 1 then IdentT "int" else IdentT "float") [] -- FIXME: とりあえずの実装
 trans t (ImmR x) =
   if not (isNumType t)
      then reportError $ "invalid type: " ++ show x ++ " is not " ++ show t
@@ -337,6 +359,35 @@ trans t (IfR r1 r2 r3) = do
   res <- zipWithTreeM (\(i2,t2) (i3,t3) -> if t2 == t3 then return ((i2,i3),t2) else reportError $ "type mismatch: " ++ show t2 ++ " /= " ++ show t3 ) x2 x3
   x1 <- transCond r1 (mapTExp (const "bool") $ treeToTExp $ fmap (\(_,t0) -> t0) res)
   zipWithTreeM (\(i1,t1) ((i2,i3),t2) -> if isBoolishType t1 then insertNode (If i1 i2 i3) t2 [] else reportError $ "type mismatch: " ++ show t1 ++ " is not boolish type") x1 res
+trans t (AppR r1 r2) =
+-- r1 として許容できるのは
+-- - IdentR
+-- - LambdaR
+-- - TupleR
+-- のいずれか
+--
+--
+-- 次のようなものは許容しない (v2.3 でも許容していない)
+-- f = if ... then fun(x) ... else fun(x) ...
+-- q = f a
+  case r1 of
+    IdentR n -> do
+      b <- isExternFunc n
+      if b
+        then transExternFunc n r2
+        else do
+          (p1,_,r) <- lookupIdent n
+          case r of
+            ValueR r'     -> local (\e -> e { sourcePos = p1 }) $ trans t (AppR r' r2)
+            ValueN (Node xs) -> do
+              i <- evalToInt r2
+              if i >= 0 && i < length xs then return (xs !! i) else reportError $ "out-of-range tuple index: " ++ show i
+            _      -> reportError $ "invalid type: " ++ show (T.unpack n) ++ " is not appliable"
+    TupleR xs   -> evalToInt r2 >>= (\i -> if i >= 0 && i < length xs then trans t (xs !! i) else reportError $ "out-of-range tuple index: " ++ show i)
+    LambdaR l r -> do
+      iTbl <- bindArgs l r2
+      local (\e -> e { identTable = iTbl |+> identTable e }) $ trans t r
+    _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
 
 transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
 transValue t0 (p,idx,v) =
@@ -384,6 +435,18 @@ transCond r t = do
   g0 <- get
   trans (IdentT "bool") r `catchError` (\_ -> put g0 >> trans t r)
 
+-- |
+-- transExternFunc の仕様
+--
+-- 将来、この仕様は変更されるだろう
+--
+-- v2.3 までは、スカラー関数のみを扱ってきた
+-- そのふるまいを継承する
+transExternFunc :: IdentName -> RExp -> TransM (Tree (OMID,TExp))
+transExternFunc fn r = do
+  res <- trans SomeType r
+  mapM (\(i,t) -> insertNode (Call1 fn [i]) t []) res
+
 whenGlobal :: IdentName -> (TExp -> TransM a) -> TransM a -> TransM a
 whenGlobal n act1 act2 = do
   vs <- reader gVariables
@@ -408,97 +471,6 @@ mapTExp f (TupleT ts)   = TupleT $ map (mapTExp f) ts
 mapTExp f (GridT npk t) = GridT npk (mapTExp f t)
 mapTExp _ SomeType      = SomeType
 
---trans :: IdentTable -> TypeTable -> GlobalVariables -> OMGraph -> TExp -> AlexPosn -> RExp -> Either String (OMGraph, Tree OMID, TExp)
---trans !iTbl !tTbl vs !g t _ (IdentR n)
---  | n `elem` (map fst vs) = do
---    let Just t' = lookup n vs
---    return (insertNode g (LoadGlobal (vec [0,0,0]) n) t' [SourceName n])
---  | otherwise = do
---    (p,idx,v) <- lookupIdent n iTbl
---    let as = if n `isManifest` tTbl then [SourceName n,ManifestNode] else [SourceName n]
---    updateAnnots as <$>
---      case v of
---        ValueR r -> let iTbl' = HM.fromList [(i,(p,[],ValueI x)) | (i,x) <- zip idx [0..]]
---                    in trans (iTbl <> iTbl') tTbl vs g t p r
---        ValueN ids t1 -> return (g,ids,t1)
---        ValueI i -> return $ insertNode g (LoadIndex i) (IdentT "int") []
---trans !iTbl !tTbl vs !g t p (ImmR x) =
---  if not (isNumType t)
---    then Left $ "invalid type: " ++ show x ++ " is not " ++ show t
---    else return (insertNode g (Imm x) t [])
---trans !iTbl !tTbl vs !g t p (TupleR xs)       =
---  case t of
---    TupleT ts -> transTuple iTbl tTbl vs g p (zip ts xs)
---    SomeType -> transTuple iTbl tTbl vs g p (map (\x -> (SomeType,x)) xs)
---    _ -> Left $ "invalid type: " ++ show (TupleR xs) ++ " is not " ++ show t
---trans !iTbl !tTbl vs !g t p (GridR idx r)     = do
---  (g1,ids1,t1) <- trans iTbl tTbl vs g t p r
---  case t1 of
---    (IdentT _)     -> return (g1,ids1,t1)
---    (GridT off t') -> do
---      let newPos = (-) <$> off <*> (fmap (\(NPlusK _ x) -> x) idx)
---          intOff = fmap floor newPos
---          newOff = (-) <$> newPos <*> (fmap fromIntegral intOff)
---          t2 = GridT newOff t'
---      if intOff == (pure [0,0,0])
---         then return (g1,ids1,t1)
---         else insertNode g1 (Load (fmap negate intOff) ids1) t1 []
---    (TupleT ts)    -> undefined
---trans !iTbl !tTbl vs !g t p (UniopR op r)     = do
---  -- TODO: 型のチェック
---  (g1,ids1,t1) <- trans iTbl tTbl vs g t p r
---  let (g2,ids2) = insertUniop op g1 ids1 t1
---  return (g2,ids2,t1)
---trans !iTbl !tTbl vs !g t p (BinopR op r1 r2) = do
---  -- TODO: 型のキャスト
---  (g1,ids1,t1) <- trans iTbl tTbl vs g t p r1
---  (g2,ids2,t2) <- trans iTbl tTbl vs g1 t p r2
---  matchType t1 t2 -- スカラーの拡張に対応できていない
---  let (g3,ids3,t3) = insertBinop op g2 ids1 ids2 t1
---  return (g3,ids3,t3)
---trans !iTbl !tTbl vs !g t p (LetR b r)        = do
---  iTbl' <- makeIdentTable b
---  tTbl' <- makeTypeTable b
---  trans (iTbl <> iTbl') (tTbl <> tTbl') vs g t p r
---trans !iTbl !tTbl vs !g t p (LambdaR args r)  = Left "error"
---trans !iTbl !tTbl vs !g t p (IfR cnd r1 r2)   = do
---  -- TODO: 型のキャスト
---  (g1,ids1,t1) <- trans iTbl tTbl vs g (IdentT "bool") p cnd
---  (g2,ids2,t2) <- trans iTbl tTbl vs g1 t p r1
---  (g3,ids3,t3) <- trans iTbl tTbl vs g2 t p r2
---  matchType t1 (IdentT "bool") -- 正しいふるまいではない
---  matchType t2 t3
---  let (g4,ids4) = insertIf g3 ids1 ids2 ids3 t2
---  return (g4,ids4,t2)
---trans !iTbl !tTbl vs !g t p (AppR r1 r2)      = do
----- r1 として許容できるのは
----- - IdentR
----- - LambdaR
----- - TupleR
----- のいずれか
-----
-----
----- 次のようなものは許容しない (v2.3 でも許容していない)
----- f = if ... then fun(x) ... else fun(x) ...
----- q = f a
---  case r1 of
---    -- TODO: 外部関数への対応
---    IdentR n    | n `isExternFunc` tTbl -> undefined
---                | otherwise -> do
---      (p1,_,r) <- lookupIdent n iTbl
---      case r of
---        ValueR r'     -> trans iTbl tTbl vs g t p1 (AppR r' r2)
---        ValueN (Node ids) (TupleT ts) -> do
---          i <- evalToInt r2 iTbl
---          if i >= 0 && i < length ts then return (g,ids !! i,ts !! i) else Left "tuple indexing is too large"
---        _      -> Left $ "error: " ++ show (T.unpack n) ++ "is not appliable"
---    TupleR xs   -> evalToInt r2 iTbl >>= (\i -> if i >= 0 && i < length xs then trans iTbl tTbl vs g t p (xs !! i) else Left "tuple indexing is too large")
---    LambdaR l r -> do
---      (g1,ids1,t1) <- trans iTbl tTbl vs g t p r2
---      iTbl' <- bindArgs p l ids1
---      trans (iTbl <> iTbl') tTbl vs g t p r
---    _ -> Left $ "error: " ++ show r1 ++ "is not appliable"
-
 lookupIdent :: IdentName -> TransM (AlexPosn, [IdentName], Value)
 lookupIdent n = do
   tbl <- reader identTable
@@ -506,68 +478,52 @@ lookupIdent n = do
     Nothing -> reportError $ "Not found the identifier " ++ show (T.unpack n)
     Just x  -> return x
 
--- evalToInt :: RExp -> IdentTable -> Either String Int
--- evalToInt (ImmR n) _ = if denominator n == 1 then return (fromInteger $ numerator n) else Left "non-integer indexing in tuple access"
--- evalToInt (IdentR n) tbl = do
---   (_,_,v) <- lookupIdent n tbl
---   case v of
---     ValueR r -> evalToInt r tbl
---     _        -> Left ""
--- evalToInt r _ = Left $ show r ++ " is not integer"
+lookupType :: IdentName -> TransM TExp
+lookupType n = do
+  tbl <- reader typeTable
+  return $ case HM.lookup n tbl of
+    Nothing    -> SomeType
+    Just (_,t) -> t
 
-bindArgs :: AlexPosn -> LExp -> Tree OMID -> Either String IdentTable
-bindArgs p (TupleL ls) (Node ids) | length ls == length ids = undefined
-bindArgs _ _ _                    = Left "tuple length mismatch"
+evalToInt :: RExp -> TransM Int
+evalToInt (ImmR n) = if denominator n == 1 then return (fromInteger $ numerator n) else reportError "non-integer indexing in tuple access"
+evalToInt (IdentR n) = do
+  (p,_,v) <- lookupIdent n
+  case v of
+    ValueR r -> local (\e -> e { sourcePos = p }) $ evalToInt r
+    _        -> reportError $ show (T.unpack n) ++ " is not integer"
+evalToInt r = reportError $ show r ++ " is not integer"
 
--- transTuple :: IdentTable -> TypeTable -> GlobalVariables -> OMGraph -> AlexPosn -> [(TExp,RExp)] -> Either String (OMGraph, Tree OMID, TExp)
--- transTuple iTbl tTbl vs g p xs = (\(g0,ids,ts) -> (g0,Node ids,TupleT ts)) <$> foldM worker (g,[],[]) xs
---   where
---     worker (g0,ids,ts) (t,r) = do
---       (g1,i1,t1) <- trans iTbl tTbl vs g0 t p r
---       return (g1,ids <> [i1], ts <> [t1])
+-- |
+-- bindArgs の仕様
+--
+-- l が識別子なら、そのままマッチ可能
+-- l と r2 が同じ長さのタプルなら、そのままマッチ可能
+-- l がタプルで、 r2 がタプル以外なら、r2 を評価してからマッチを行う
+--
+-- あらゆる場合において r2 を先に評価しないのは、関数の受け渡しを許容するためである
+-- (LambdaR に対する trans は常に失敗する)
+bindArgs :: [LExp] -> RExp -> TransM IdentTable
+bindArgs [IdentL l] r = do
+  p <- reader sourcePos
+  return $ HM.fromList [(l,(p,[],ValueR r))]
+bindArgs ls r@(TupleR rs) = do
+  if length ls /= length rs
+    then reportError "tuple length mismatch"
+    else do
+      p <- reader sourcePos
+      makeIdentTable [VarDecl p (TupleL ls) r]
+bindArgs ls r = do
+  res <- trans SomeType r
+  p <- reader sourcePos
+  makeIdentTable' p (TupleL ls) res
 
-zipTreeWithTExp :: Tree a -> TExp -> Tree (a,TExp)
-zipTreeWithTExp (Leaf x) t = Leaf (x,t)
-zipTreeWithTExp (Node xs) (TupleT ts) = Node [zipTreeWithTExp x t | (x,t) <- zip xs ts]
-zipTreeWithTExp _ _ = error "error at Formura0.Middleend.Translate.zipTreeWithTExp"
-
-foldTree :: (g -> a -> (g,b)) -> g -> Tree a -> (g, Tree b)
-foldTree f g (Leaf x)      = Leaf <$> f g x
-foldTree _ g (Node [])     = (g,Node [])
-foldTree f g (Node (x:xs)) = (g2, Node (y:ys))
   where
-    (g1,y) = foldTree f g x
-    (g2,Node ys) = foldTree f g1 (Node xs)
-
--- insertUniop :: Op1 -> OMGraph -> Tree OMID -> TExp -> (OMGraph, Tree OMID)
--- insertUniop op g ids ts = foldTree worker g (zipTreeWithTExp ids ts)
---   where
---     worker g0 (i,t) = (\(g',Leaf i',_) -> (g',i')) $ insertNode g0 (Uniop op i) t []
-
--- |
--- 二項演算のふるまい
--- (a,b) + (c,d) => (a+c,b+d)
--- a + (b,c) => (a+b,a+c)
--- (a,b) + c => (a+c,b+c)
---
-insertBinop :: Op2 -> OMGraph -> Tree OMID -> Tree OMID -> TExp -> (OMGraph, Tree OMID, TExp)
-insertBinop = undefined
-
--- |
--- 現在 (v2.3) の振る舞いでは
--- if (a,b) == (1,2) then (0,10) else (1,11)
--- が
--- (if a == 1 then 0 else 1, if b == 2 then 10 else 11)
--- と同値になる
---
--- また
--- if a == 1 then (0,10) else (1,11)
--- が
--- (if a == 1 then 0 else 1, if a == 1 then 10 else 11)
--- と同値になる
---
-insertIf :: OMGraph -> Tree OMID -> Tree OMID -> Tree OMID -> TExp -> (OMGraph, Tree OMID)
-insertIf = undefined
+    -- makeIdentTable' の LExp に GridL は絶対にない (Parser の構成から)
+    makeIdentTable' :: AlexPosn -> LExp -> Tree (OMID,TExp) -> TransM IdentTable
+    makeIdentTable' p0 (TupleL ls0) (Node xs) | length ls == length xs = HM.unions <$> zipWithM (makeIdentTable' p0) ls0 xs
+    makeIdentTable' p0 (IdentL l) x = return $ HM.singleton l (p0,[],ValueN x)
+    makeIdentTable' _ _ _ = reportError "tuple length mismatch"
 
 storeResult :: Tree (OMID,TExp) -> TransM ()
 storeResult res = do
@@ -593,16 +549,24 @@ isManifest n = do
     Just (ms,_) -> TMManifest `elem` ms
     Nothing     -> False
 
-isExternFunc :: IdentName -> TypeTable -> Bool
-isExternFunc n tbl = case HM.lookup n tbl of
-                       Just (ms,_) -> TMExtern `elem` ms
-                      -- ^ FIXME: ほんとは型もチェックするべき
-                       Nothing     -> False
+isExternFunc :: MonadReader Env m => IdentName -> m Bool
+isExternFunc n = do
+  tbl <- reader typeTable
+  return $ case HM.lookup n tbl of
+    Just (ms,_) -> TMExtern `elem` ms
+    -- ^ FIXME: ほんとは型もチェックするべき
+    Nothing     -> False
 
 updateAnnots :: MonadState OMGraph m => [Annot] -> Tree (OMID,TExp) -> m ()
 updateAnnots as ids = mapM_ addAnnots (flatten ids)
   where
     addAnnots (i,_) = modify' (\g -> M.adjust (\n -> n { annot = as }) i g)
+
+expectType :: TExp -> TExp -> TransM TExp
+expectType t1 SomeType = return t1
+expectType SomeType t2 = return t2
+expectType (TupleT ts1) (TupleT ts2) | length ts1 == length ts2 = TupleT <$> zipWithM expectType ts1 ts2
+expectType t1 t2       = matchType t1 t2
 
 matchType :: TExp -> TExp -> TransM TExp
 matchType (IdentT t1) (IdentT t2) | t1 == t2 = return $ IdentT t1

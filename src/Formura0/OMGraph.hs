@@ -17,8 +17,8 @@ data OMInst = Load !(Vec Int) !OMID
             | Binop !Op2 !OMID !OMID
             | If !OMID !OMID !OMID
             | Imm !Rational
-            | Call1 !IdentName ![OMID] !OMID
-            | CallN !IdentName ![OMID] ![OMID]
+            | Call1 !IdentName ![OMID]
+            -- | CallN !IdentName ![OMID] ![OMID]
   deriving (Show)
 
 data OMNode = OMNode
