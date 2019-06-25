@@ -53,7 +53,7 @@ spec = do
     it "check lambda expression" $
       parse "f = fun(a,(b,c)) a*b + c" `shouldBe`
         Right [ TypeDecl (AlexPn 2 1 3) (ModifiedType [] None) (Ident "f")
-              , VarDecl (AlexPn 2 1 3) (Ident "f") (Lambda' (Tuple [Ident "a",Tuple [Ident "b",Ident "c"]]) (Binop' Add (Binop' Mul (Ident' "a") (Ident' "b")) (Ident' "c")))
+              , VarDecl (AlexPn 2 1 3) (Ident "f") (Lambda' [Ident "a",Tuple [Ident "b",Ident "c"]] (Binop' Add (Binop' Mul (Ident' "a") (Ident' "b")) (Ident' "c")))
               ]
     it "check if expression" $
       parse "x = if a then b else c + d" `shouldBe`
@@ -67,23 +67,23 @@ spec = do
               , TypeDecl (AlexPn 10 2 3) (ModifiedType [] None) (Ident "z")
               , VarDecl (AlexPn 10 2 3) (Ident "z") (App' (Ident' "g") (Tuple' [Imm' 1.0, Ident' "a"]))
               , TypeDecl (AlexPn 23 3 3) (ModifiedType [] None) (Ident "w")
-              , VarDecl (AlexPn 23 3 3) (Ident "w") (App' (Lambda' (Ident "x") (App' (Ident' "f") (App' (Ident' "g") (Ident' "x"))))
+              , VarDecl (AlexPn 23 3 3) (Ident "w") (App' (Lambda' [Ident "x"] (App' (Ident' "f") (App' (Ident' "g") (Ident' "x"))))
                                                          (Tuple' [Imm' 1,Ident' "a"]))
               ]
     it "check function application chain" $
       parse "x = fun(a) f(a)(b)" `shouldBe`
         Right [ TypeDecl (AlexPn 2 1 3) (ModifiedType [] None) (Ident "x")
-              , VarDecl (AlexPn 2 1 3) (Ident "x") (Lambda' (Tuple [Ident "a"]) (App' (App' (Ident' "f") (Ident' "a")) (Ident' "b")))
+              , VarDecl (AlexPn 2 1 3) (Ident "x") (Lambda' [Ident "a"] (App' (App' (Ident' "f") (Ident' "a")) (Ident' "b")))
               ]
     it "check function definition" $
       parse "begin function x = f(a,b,c)\nx = a*b + c\nend function\n\nbegin function (u,v) = init()\ndouble :: u = 0, v = 0\nend function" `shouldBe`
         Right [ TypeDecl (AlexPn 0 1 1) (ModifiedType [] None) (Ident "f")
-              , VarDecl (AlexPn 0 1 1) (Ident "f") (Lambda' (Tuple [Ident "a",Ident "b",Ident "c"])
+              , VarDecl (AlexPn 0 1 1) (Ident "f") (Lambda' [Ident "a",Ident "b",Ident "c"]
                                                             (Let' [ TypeDecl (AlexPn 30 2 3) (ModifiedType [] None) (Ident "x")
                                                                   , VarDecl (AlexPn 30 2 3) (Ident "x") (Binop' Add (Binop' Mul (Ident' "a") (Ident' "b")) (Ident' "c"))]
                                                                   (Ident' "x")))
               , TypeDecl (AlexPn 54 5 1) (ModifiedType [] None) (Ident "init")
-              , VarDecl (AlexPn 54 5 1) (Ident "init") (Lambda' (Tuple []) (Let' [ TypeDecl (AlexPn 91 6 8) (ModifiedType [] (Ident "double")) (Ident "u")
+              , VarDecl (AlexPn 54 5 1) (Ident "init") (Lambda' [] (Let' [ TypeDecl (AlexPn 91 6 8) (ModifiedType [] (Ident "double")) (Ident "u")
                                                                                 , VarDecl (AlexPn 96 6 13) (Ident "u") (Imm' 0)
                                                                                 , TypeDecl (AlexPn 91 6 8) (ModifiedType [] (Ident "double")) (Ident "v")
                                                                                 , VarDecl (AlexPn 103 6 20) (Ident "v") (Imm' 0)
@@ -93,7 +93,7 @@ spec = do
     it "check logical expression" $
       parse "max = fun(x,y) if x > y then x else y\nz = if (x >= 0) && (x <= 10) then 1 else 0" `shouldBe`
         Right [ TypeDecl (AlexPn 4 1 5) (ModifiedType [] None) (Ident "max")
-              , VarDecl (AlexPn 4 1 5) (Ident "max") (Lambda' (Tuple [Ident "x",Ident "y"]) (If' (Binop' Gt (Ident' "x") (Ident' "y")) (Ident' "x") (Ident' "y")))
+              , VarDecl (AlexPn 4 1 5) (Ident "max") (Lambda' [Ident "x",Ident "y"] (If' (Binop' Gt (Ident' "x") (Ident' "y")) (Ident' "x") (Ident' "y")))
               , TypeDecl (AlexPn 40 2 3) (ModifiedType [] None) (Ident "z")
               , VarDecl (AlexPn 40 2 3) (Ident "z") (If' (Binop' And (Binop' GEq (Ident' "x") (Imm' 0)) (Binop' LEq (Ident' "x") (Imm' 10))) (Imm' 1) (Imm' 0))
               ]

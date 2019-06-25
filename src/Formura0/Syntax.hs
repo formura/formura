@@ -33,7 +33,7 @@ data Exp' = Ident' !IdentName
           | Uniop' !Op1 Exp'
           | Binop' !Op2 Exp' Exp'
           | Let' ![Statement0] Exp'
-          | Lambda' !Exp Exp'
+          | Lambda' ![Exp] Exp'
           | If' Exp' Exp' Exp'
           | App' Exp' Exp'
   deriving (Eq,Show)
@@ -64,7 +64,7 @@ data RExp = IdentR !IdentName
           | UniopR !Op1 RExp
           | BinopR !Op2 RExp RExp
           | LetR ![Statement] RExp
-          | LambdaR !LExp RExp
+          | LambdaR ![LExp] RExp
           | IfR RExp RExp RExp
           | AppR RExp RExp
   deriving (Eq,Show)

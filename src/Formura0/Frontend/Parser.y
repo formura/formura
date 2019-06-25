@@ -84,7 +84,7 @@ specialDecl : dimension "::" int                 { [SpcDecl (getPos $1) (Dimensi
 axesLabels : var                                 { [$1] }
            | axesLabels ',' var                  { $1 <> [$3] }
 
-functionDef : begin function rexp '=' var '(' args ')' ';' decls ';' end function { [TypeDecl (getPos $1) (ModifiedType [] None) (Ident $5), VarDecl (getPos $1) (Ident $5) (Lambda' (Tuple $7) (Let' $10 $3)) ] }
+functionDef : begin function rexp '=' var '(' args ')' ';' decls ';' end function { [TypeDecl (getPos $1) (ModifiedType [] None) (Ident $5), VarDecl (getPos $1) (Ident $5) (Lambda' $7 (Let' $10 $3)) ] }
 
 decls : decl                                     { $1 }
       | decls ';' decl                           { $1 <> $3 }
@@ -157,10 +157,10 @@ rexp : rexp '+' rexp                             { Binop' Add $1 $3 }
      | term                                      { $1 }
      | let decls in rexp                         { Let' $2 $4 }
      | let decls ';' in rexp                     { Let' $2 $5 }
-     | fun '(' args ')' rexp                     { Lambda' (Tuple $3) $5 }
+     | fun '(' args ')' rexp                     { Lambda' $3 $5 }
      | if rexp then rexp else rexp               { If' $2 $4 $6 }
      | apply                                     { $1 }
-     | var '.' var                               { Lambda' (Ident "x") (App' (Ident' $1) (App' (Ident' $3) (Ident' "x"))) }
+     | var '.' var                               { Lambda' [Ident "x"] (App' (Ident' $1) (App' (Ident' $3) (Ident' "x"))) }
 
 term : '(' rexp ')'                              { $2 }
      | var                                       { Ident' $1 }

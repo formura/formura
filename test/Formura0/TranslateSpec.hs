@@ -28,5 +28,5 @@ spec = do
                                       ])
   describe "findGlobalVariables" $ do
     it "check a simple case" $
-      findGlobalVariables (HM.singleton "init" (AlexPn 1 1 1, [], ValueR $ LambdaR (TupleL []) (LetR [TypeDecl (AlexPn 1 1 1) (ModifiedType [] (GridT (vec []) (IdentT "double"))) (IdentL "u"), VarDecl (AlexPn 1 1 1) (IdentL "u") (ImmR 0), TypeDecl (AlexPn 2 2 2) (ModifiedType [] (GridT (vec []) (IdentT "double"))) (IdentL "v"), VarDecl (AlexPn 2 2 2) (IdentL "v") (ImmR 0)] (TupleR [IdentR "u", IdentR "v"]))))
+      findGlobalVariables (HM.singleton "init" (AlexPn 1 1 1, [], ValueR $ LambdaR [] (LetR [TypeDecl (AlexPn 1 1 1) (ModifiedType [] (GridT (vec []) (IdentT "double"))) (IdentL "u"), VarDecl (AlexPn 1 1 1) (IdentL "u") (ImmR 0), TypeDecl (AlexPn 2 2 2) (ModifiedType [] (GridT (vec []) (IdentT "double"))) (IdentL "v"), VarDecl (AlexPn 2 2 2) (IdentL "v") (ImmR 0)] (TupleR [IdentR "u", IdentR "v"]))))
         `shouldBe` Right [("u", GridT (vec []) (IdentT "double")),("v", GridT (vec []) (IdentT "double"))]

@@ -15,8 +15,8 @@ module Formura0.Frontend
 --
 -- それぞれ、サブモジュールに分割し実装する
 
-import Control.Monad
 import Control.Applicative
+import Control.Monad
 import System.Exit
 
 import Formura0.Frontend.Lexer
@@ -76,7 +76,7 @@ fixRExp (Grid' i e)       = GridR <$> fixIndexR i <*> fixRExp e
 fixRExp (Uniop' op e)     = UniopR op <$> fixRExp e
 fixRExp (Binop' op e1 e2) = BinopR op <$> fixRExp e1 <*> fixRExp e2
 fixRExp (Let' xs e)       = LetR <$> fixStatements xs <*> fixRExp e
-fixRExp (Lambda' l r)     = LambdaR <$> fixLExp l <*> fixRExp r
+fixRExp (Lambda' l r)     = LambdaR <$> (mapM fixLExp l) <*> fixRExp r
 fixRExp (If' e1 e2 e3)    = IfR <$> fixRExp e1 <*> fixRExp e2 <*> fixRExp e3
 fixRExp (App' e1 e2)      = AppR <$> fixRExp e1 <*> fixRExp e2
 
