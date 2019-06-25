@@ -147,14 +147,14 @@ genOMProgram prog cfg = do
 calcSleeve :: OMGraph -> Int
 calcSleeve = undefined
 
-makeIdentTable :: Program -> Either String IdentTable
+makeIdentTable :: MonadError TransError m => Program -> m IdentTable
 makeIdentTable prog = return $ HM.fromList [ (n,(p,idx,ValueR e)) | VarDecl p l r <- prog, (n,!idx,e) <- unwrap l r]
   where
     unwrap (TupleL xs) r = concat [unwrap x (AppR r (ImmR i)) | (x,i) <- zip xs [0..]]
     unwrap (IdentL n) r  = [(n,[],r)]
     unwrap (GridL (Vec (ZipList idx)) l) r = [(n,idx++idx',r') | (n,idx',r') <- unwrap l r]
 
-makeTypeTable :: Program -> Either String TypeTable
+makeTypeTable :: MonadError TransError m => Program -> m TypeTable
 makeTypeTable prog = return $ HM.fromList [ (n,(ms,t')) | (TypeDecl _ (ModifiedType ms t) l) <- prog, (n,t') <- unwrap l t]
   where
     unwrap (IdentL n) t            = [(n,t)]
@@ -319,6 +319,10 @@ trans t (BinopR op r1 r2) = do
   x1 <- trans t r1
   x2 <- trans t r2
   transBinop op x1 x2
+trans t (LetR b r) = do
+  iTbl <- makeIdentTable b
+  tTbl <- makeTypeTable b
+  local (\e -> e { identTable = iTbl |+> identTable e, typeTable = tTbl |+> typeTable e })  $ trans t r
 
 transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
 transValue t0 (p,idx,v) =
