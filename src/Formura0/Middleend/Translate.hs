@@ -323,6 +323,7 @@ trans t (LetR b r) = do
   iTbl <- makeIdentTable b
   tTbl <- makeTypeTable b
   local (\e -> e { identTable = iTbl |+> identTable e, typeTable = tTbl |+> typeTable e })  $ trans t r
+trans t r@(LambdaR _ _) = reportError $ "invalid value: " ++ show r ++ " is a function"
 
 transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
 transValue t0 (p,idx,v) =
