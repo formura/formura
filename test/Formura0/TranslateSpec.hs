@@ -14,6 +14,17 @@ spec = do
   describe "Tree" $ do
     it "check flatten" $
       flatten (Node [Leaf "a", Node [Leaf "b", Leaf "c"], Leaf "d"]) `shouldBe` (["a","b","c","d"] :: [String])
+  describe "zipWithTreeM" $ do
+    let xs = Node [Leaf True, Node [Leaf True, Leaf False], Leaf False]
+    let ys = Node [Leaf True, Node [Leaf False, Leaf True], Leaf False]
+    let zs = Node [Leaf True, Node [Leaf True], Leaf False]
+    let f x y = if x == y then Right x else Left "BAN!"
+    it "check a valid case" $
+      zipWithTreeM f xs xs `shouldBe` Right xs
+    it "check an invalid case" $
+      zipWithTreeM f xs ys `shouldBe` Left "BAN!"
+    it "check a mismatch case" $
+      zipWithTreeM f xs zs `shouldBe` Left "tree mismatch"
   describe "makeIdentTable" $ do
     it "check a simple case" $
       makeIdentTable [ VarDecl (AlexPn 1 1 1) (IdentL "x") (ImmR 1.0)
