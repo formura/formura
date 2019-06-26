@@ -227,31 +227,37 @@ buildGraph iTbl tTbl vs name = do
     Nothing -> Left $ "Not found " ++ show (T.unpack name) ++ " function"
 
 buildGraph' :: IdentTable -> TypeTable -> GlobalVariables -> IdentName -> Either String (Maybe OMGraph)
-buildGraph' iTbl tTbl vs name = sequence $ translate iTbl tTbl vs . (\(p,_,ValueR r) -> (p,r)) <$> HM.lookup name iTbl
+buildGraph' iTbl tTbl vs name = sequence $ (translate iTbl tTbl vs <=< validate name (map snd vs)) <$> HM.lookup name iTbl
+
+-- |
+-- validate は
+-- - 関数かどうか
+-- - 引数と返り値が適切な数か
+-- を検証する
+validate :: IdentName -> [TExp] -> (AlexPosn,[IdentName],Value) -> Either String (AlexPosn,Program,RExp)
+validate f ts (p,_,ValueR (LambdaR args (LetR b xs))) | validArg && validRes = return (p,b,xs)
+                                                      | otherwise = Left $ "The number of (arguments|returned values) of " ++ (T.unpack f) ++ " is not equal to the number of global variables"
+  where
+    nt = length ts
+    validArg = length args == (if f == "init" then 0 else nt)
+    validRes = case xs of
+                 IdentR _  -> nt == 1
+                 TupleR rs -> nt == length rs
+                 _         -> False
+validate f _ _ = Left $ (T.unpack f) ++ " is not a function"
 
 -- |
 -- translate の仕様
 --
 -- ターゲットの関数のローカルな IdentTable と TypeTable を構築して、
 -- trans 関数と storeResult 関数でグラフを構築する
-translate :: IdentTable -> TypeTable -> GlobalVariables -> (AlexPosn,RExp) -> Either String OMGraph
-translate iTbl tTbl vs (p,LambdaR args (LetR b xs)) = do
-  typecheck vs args xs
+translate :: IdentTable -> TypeTable -> GlobalVariables -> (AlexPosn,Program,RExp) -> Either String OMGraph
+translate iTbl tTbl vs (p,b,xs) = do
   iTbl' <- makeIdentTable b
   tTbl' <- makeTypeTable b
   run (iTbl' |+> iTbl) (tTbl' |+> tTbl) vs p $ do
     res <- trans (TupleT $ map snd vs) xs
     storeResult res
-translate _ _ _ _                      = Left "Not a function"
-
--- |
--- typecheck は、グローバル関数の引数と返り値の数がグローバル変数と一致するか調べる
---
--- FIXME: init 関数に対して正しく動作しない
-typecheck :: GlobalVariables -> [LExp] -> RExp -> Either String ()
-typecheck vs ls (TupleR rs) = if n == length ls && n == length rs then return () else Left "mismatch the length of tuples"
-  where n = length vs
-typecheck _ _ _ = Left "must be a tuple to tuple function"
 
 -- |
 -- TransM の状態である OMGraph に変更を行うのは insertNode 関数のみ
