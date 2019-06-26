@@ -15,7 +15,6 @@ import           Control.Monad.State.Strict
 import           Data.Bifunctor (bimap)
 import           Data.Hashable (Hashable)
 import qualified Data.HashMap.Strict as HM
-import           Data.List
 import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Ratio
@@ -62,8 +61,12 @@ flatten :: Tree a -> [a]
 flatten (Leaf a)  = [a]
 flatten (Node ts) = concatMap flatten ts
 
-unzipTree :: [(Tree a,TExp)] -> (Tree a, TExp)
-unzipTree = (\(xs,ts) -> (Node xs, TupleT ts)) . unzip
+zipWithTreeM :: MonadError TransError m => (a -> b -> m c) -> Tree a -> Tree b -> m (Tree c)
+zipWithTreeM f (Leaf x) (Leaf y)    = Leaf <$> f x y
+zipWithTreeM f x@(Leaf _) (Node ys) = Node <$> mapM (\y -> zipWithTreeM f x y) ys
+zipWithTreeM f (Node xs) y@(Leaf _) = Node <$> mapM (\x -> zipWithTreeM f x y) xs
+zipWithTreeM f (Node xs) (Node ys) | length xs == length ys = Node <$> zipWithM (zipWithTreeM f) xs ys
+                                   | otherwise = throwError "tree mismatch"
 
 data Env = Env
   { identTable :: !IdentTable
@@ -102,15 +105,14 @@ reportError msg = do
 
 -- |
 -- genOMProgram の仕様
--- 1. 型のチェックを行う
--- 2. グローバル変数を特定する
--- 3. Map Ident ValueExpr を構築する (必要??)
--- 4. 各関数についてインライン展開を行い、計算グラフを構築する
 --
--- 自分のノードIDと型を返すのがポイント...?
+-- - グローバルな IdentTable と TypeTable を構築する
+-- - グローバル変数を特定する
+-- - init, step, first_step, filter 関数についてグラフを構築する
+-- - 特殊宣言を処理する
+-- - numerical config の検証と変換をする
 genOMProgram :: Program -> NumericalConfig -> Either String OMProgram
 genOMProgram prog cfg = do
-  _ <- globalTypeCheck prog
   iTbl <- makeIdentTable prog
   tTbl <- makeTypeTable prog
   vs <- findGlobalVariables iTbl
@@ -163,11 +165,6 @@ makeTypeTable prog = return $ HM.fromList [ (n,(ms,t')) | (TypeDecl _ (ModifiedT
     unwrap (TupleL xs) SomeType    = concat [unwrap x SomeType | x <- xs]
     unwrap _ _                     = error "error" -- FIX ME
 
-typeOf :: IdentName -> TypeTable -> Either String TExp
-typeOf n tbl = case HM.lookup n tbl of
-                 Nothing -> Left $ "Not found " ++ show (T.unpack n)
-                 Just t  -> Right (snd t)
-
 findGlobalVariables :: IdentTable -> Either String [(IdentName,TExp)]
 findGlobalVariables tbl =
   case HM.lookup "init" tbl of
@@ -186,14 +183,13 @@ findGlobalVariables tbl =
         _ -> Left $ "Error: " ++ formatPos p ++ " init must return a tuple of grid"
     Just (p,_,_)           -> Left $ "Error:" ++ formatPos p ++ " init must be a function"
   where
+    typeOf n tTbl = case HM.lookup n tTbl of
+                      Nothing -> Left $ "Not found " ++ show (T.unpack n)
+                      Just t  -> Right (snd t)
+
     unwrap xs = case [n | (IdentR n) <- xs] of
                   ys | length ys == length xs -> Right ys
                      | otherwise -> Left "init must return a tuple of grid"
-
-namesOfLExp :: LExp -> [IdentName]
-namesOfLExp (IdentL n)  = [n]
-namesOfLExp (TupleL xs) = concatMap namesOfLExp xs
-namesOfLExp (GridL _ x) = namesOfLExp x
 
 selectSpecialDecl :: Program -> [SpecialDeclaration]
 selectSpecialDecl prog = [ s | (SpcDecl _ s) <- prog ]
@@ -234,43 +230,15 @@ buildGraph' :: IdentTable -> TypeTable -> GlobalVariables -> IdentName -> Either
 buildGraph' iTbl tTbl vs name = sequence $ translate iTbl tTbl vs . (\(p,_,ValueR r) -> (p,r)) <$> HM.lookup name iTbl
 
 -- |
--- 計算グラフ構築の仕様
+-- translate の仕様
 --
--- 基本的には、構文木を下から走査して遅延評価で上から評価していけばよさそう
--- いまいち、明確になっていないのは
--- - 変数や関数適用をどうやってたどるか -> 記号表的なものを使用するのかな...
--- - タプルをどうやってたどるか; 特に左辺がタプルで右辺が関数適用の場合など
--- あたり?
---
--- 例を考える
--- f = fun(x) 2*x + 1
--- step = fun(q) let a = f(q)
---                   q' = q + a
---                in q'
---
--- これを計算グラフに変換すると
--- 1: Load q
--- 2: Imm 2
--- 3: Imm 1
--- 4: Binop Mul 1 2
--- 5: Binop Add 4 3
--- 6: Binop Add 1 5
--- 7: Store q 7
---
---
--- 検討点
--- - ローカルスコープの実現
--- - タプルの処理
--- - グローバル変数の load と store
---
-
+-- ターゲットの関数のローカルな IdentTable と TypeTable を構築して、
+-- trans 関数と storeResult 関数でグラフを構築する
 translate :: IdentTable -> TypeTable -> GlobalVariables -> (AlexPosn,RExp) -> Either String OMGraph
 translate iTbl tTbl vs (p,LambdaR args (LetR b xs)) = do
   typecheck vs args xs
   iTbl' <- makeIdentTable b
   tTbl' <- makeTypeTable b
-  -- (g,ids,_) <- trans (iTbl <> iTbl') (tTbl <> tTbl') vs M.empty (TupleT $ map snd vs) p xs
-  -- storeResult g ids vs
   run (iTbl' |+> iTbl) (tTbl' |+> tTbl) vs p $ do
     res <- trans (TupleT $ map snd vs) xs
     storeResult res
@@ -285,6 +253,8 @@ typecheck vs ls (TupleR rs) = if n == length ls && n == length rs then return ()
   where n = length vs
 typecheck _ _ _ = Left "must be a tuple to tuple function"
 
+-- |
+-- TransM の状態である OMGraph に変更を行うのは insertNode 関数のみ
 insertNode :: MonadState OMGraph m => OMInst -> TExp -> [Annot] -> m (OMID, TExp)
 insertNode i t as = do
   g <- get
@@ -311,20 +281,26 @@ insertNode i t as = do
 --
 -- trans の第一引数は、期待する型である。
 -- これは、タプルの展開と即値の型を決定するのに使う。
+-- 期待される型は、グローバル変数の型に由来するが、
+-- - 識別子をたどる (IdentR)
+-- - 条件分岐の条件式部分
+-- - 関数の実引数
+-- において SomeType に変化しうる。
 -- trans の返り値にある TExp は決定されたノードの型である。
 -- 期待する型には SomeType が含まれるが、決定されたノードの型には SomeType は含まれない。
 -- また、Tree a 型がタプルの構造を保存するため、決定されたノード型は IdentT か GridT である (はず)。
 trans :: TExp -> RExp -> TransM (Tree (OMID, TExp))
 trans t (IdentR n) = do
-  whenGlobal n (\t' -> Leaf <$> insertNode (LoadGlobal (vec [0,0,0]) n) t' [SourceName n]) $ do
-    v <- lookupIdent n
-    t' <- lookupType n
-    t0 <- expectType t t'
-    res <- transValue t0 v
-    b <- isManifest n
-    let as = if b then [SourceName n, ManifestNode] else [SourceName n]
-    updateAnnots as res
-    return res
+  vs <- reader gVariables
+  if n `elem` (map fst vs)
+     then Leaf <$> insertNode (LoadGlobal (vec [0,0,0]) n) (fromJust $ lookup n vs) [SourceName n]
+     else do
+       v <- lookupIdent n
+       t' <- lookupType n
+       t0 <- expectType t t'
+       res <- transValue t0 v
+       updateAnnots n res
+       return res
 trans SomeType (ImmR x) = Leaf <$> insertNode (Imm x) (if denominator x == 1 then IdentT "int" else IdentT "float") [] -- FIXME: とりあえずの実装
 trans t (ImmR x) =
   if not (isNumType t)
@@ -345,20 +321,12 @@ trans t (LetR b r) = do
   iTbl <- makeIdentTable b
   tTbl <- makeTypeTable b
   local (\e -> e { identTable = iTbl |+> identTable e, typeTable = tTbl |+> typeTable e })  $ trans t r
-trans t r@(LambdaR _ _) = reportError $ "invalid value: " ++ show r ++ " is a function"
+trans _ r@(LambdaR _ _) = reportError $ "invalid value: " ++ show r ++ " is a function"
 trans t (IfR r1 r2 r3) = do
-  -- if の仕様
-  --
-  -- if x then a1 else a2
-  -- このとき、 a1 と a2 の型は一致していなければならない
-  -- x は、 IdentT "bool" 型か a1、a2 と同じ形のタプルでなければならない
-  -- この振る舞いは、バックトレースで実装できる
+  x1 <- trans SomeType r1
   x2 <- trans t r2
   x3 <- trans t r3
-  -- FIXME: 適切な名前をつける
-  res <- zipWithTreeM (\(i2,t2) (i3,t3) -> if t2 == t3 then return ((i2,i3),t2) else reportError $ "type mismatch: " ++ show t2 ++ " /= " ++ show t3 ) x2 x3
-  x1 <- transCond r1 (mapTExp (const "bool") $ treeToTExp $ fmap (\(_,t0) -> t0) res)
-  zipWithTreeM (\(i1,t1) ((i2,i3),t2) -> if isBoolishType t1 then insertNode (If i1 i2 i3) t2 [] else reportError $ "type mismatch: " ++ show t1 ++ " is not boolish type") x1 res
+  transIf x1 x2 x3
 trans t (AppR r1 r2) =
 -- r1 として許容できるのは
 -- - IdentR
@@ -370,6 +338,7 @@ trans t (AppR r1 r2) =
 -- 次のようなものは許容しない (v2.3 でも許容していない)
 -- f = if ... then fun(x) ... else fun(x) ...
 -- q = f a
+--
   case r1 of
     IdentR n -> do
       b <- isExternFunc n
@@ -378,16 +347,17 @@ trans t (AppR r1 r2) =
         else do
           (p1,_,r) <- lookupIdent n
           case r of
-            ValueR r'     -> local (\e -> e { sourcePos = p1 }) $ trans t (AppR r' r2)
-            ValueN (Node xs) -> do
-              i <- evalToInt r2
-              if i >= 0 && i < length xs then return (xs !! i) else reportError $ "out-of-range tuple index: " ++ show i
-            _      -> reportError $ "invalid type: " ++ show (T.unpack n) ++ " is not appliable"
-    TupleR xs   -> evalToInt r2 >>= (\i -> if i >= 0 && i < length xs then trans t (xs !! i) else reportError $ "out-of-range tuple index: " ++ show i)
+            ValueR r'        -> local (\e -> e { sourcePos = p1 }) $ trans t (AppR r' r2)
+            ValueN (Node xs) -> evalToInt r2 >>= nthOfTuple xs
+            _                -> reportError $ "invalid type: " ++ show (T.unpack n) ++ " is not appliable"
+    TupleR xs   -> evalToInt r2 >>= nthOfTuple xs >>= trans t
     LambdaR l r -> do
       iTbl <- bindArgs l r2
       local (\e -> e { identTable = iTbl |+> identTable e }) $ trans t r
     _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
+
+  where
+    nthOfTuple xs i = if i >= 0 && i < length xs then return (xs !! i) else reportError $ "out-of-range tuple index: " ++ show i
 
 transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
 transValue t0 (p,idx,v) =
@@ -421,19 +391,17 @@ transUniop op (i,t) | isNumType t = insertNode (Uniop op i) t []
                     | otherwise = reportError $ "invalid type: " ++ show t ++ " is not numeric type"
 
 transBinop :: Op2 -> Tree (OMID,TExp) -> Tree (OMID,TExp) -> TransM (Tree (OMID,TExp))
-transBinop op (Leaf (i1,t1)) (Leaf (i2,t2)) = do
-  t3 <- inferType op =<< matchType t1 t2
-  Leaf <$> insertNode (Binop op i1 i2) t3 []
-transBinop op (Node xs1) x2@(Leaf _) = Node <$> mapM (\x1 -> transBinop op x1 x2) xs1
-transBinop op x1@(Leaf _) (Node xs2) = Node <$> mapM (\x2 -> transBinop op x1 x2) xs2
-transBinop op (Node xs1) (Node xs2) | length xs1 == length xs2 = Node <$> zipWithM (transBinop op) xs1 xs2
-                                    | otherwise = reportError $ "tuple length mismatch"
+transBinop op x1 x2 = zipWithTreeM (\(i1,t1) (i2,t2) -> matchType t1 t2 >>= inferType op >>= (\t3 -> insertNode (Binop op i1 i2) t3 [])) x1 x2
 
-transCond :: RExp -> TExp -> TransM (Tree (OMID,TExp))
-transCond r (IdentT "bool") = trans (IdentT "bool") r
-transCond r t = do
-  g0 <- get
-  trans (IdentT "bool") r `catchError` (\_ -> put g0 >> trans t r)
+-- if の仕様
+--
+-- ここでは、各識別子 (x, a1, b1...) はスカラーであるとする。
+-- if x then (a1,a2) else (b1,b2) #=> (if x then a1 else b1, if x then a2 else b2)
+-- if (x1,x2) then (a1,a2) else (b1,b2) #=> (if x1 then a1 else b1, if x2 then a2 else b2)
+transIf :: Tree (OMID,TExp) -> Tree (OMID,TExp) -> Tree (OMID,TExp) -> TransM (Tree (OMID,TExp))
+transIf x1 x2 x3 = do
+  res <- zipWithTreeM (\(i2,t2) (i3,t3) -> if t2 == t3 then return ((i2,i3),t2) else reportError $ "type mismatch: " ++ show t2 ++ " /= " ++ show t3 ) x2 x3
+  zipWithTreeM (\(i1,t1) ((i2,i3),t2) -> if isBoolishType t1 then insertNode (If i1 i2 i3) t2 [] else reportError $ "type mismatch: " ++ show t1 ++ " is not boolish type") x1 res
 
 -- |
 -- transExternFunc の仕様
@@ -446,30 +414,6 @@ transExternFunc :: IdentName -> RExp -> TransM (Tree (OMID,TExp))
 transExternFunc fn r = do
   res <- trans SomeType r
   mapM (\(i,t) -> insertNode (Call1 fn [i]) t []) res
-
-whenGlobal :: IdentName -> (TExp -> TransM a) -> TransM a -> TransM a
-whenGlobal n act1 act2 = do
-  vs <- reader gVariables
-  if n `elem` (map fst vs)
-     then act1 (fromJust $ lookup n vs)
-     else act2
-
-zipWithTreeM :: MonadError TransError m => (a -> b -> m c) -> Tree a -> Tree b -> m (Tree c)
-zipWithTreeM f (Leaf x) (Leaf y)    = Leaf <$> f x y
-zipWithTreeM f x@(Leaf _) (Node ys) = Node <$> mapM (\y -> zipWithTreeM f x y) ys
-zipWithTreeM f (Node xs) y@(Leaf _) = Node <$> mapM (\x -> zipWithTreeM f x y) xs
-zipWithTreeM f (Node xs) (Node ys) | length xs == length ys = Node <$> zipWithM (zipWithTreeM f) xs ys
-                                   | otherwise = throwError "tree mismatch"
-
-treeToTExp :: Tree TExp -> TExp
-treeToTExp (Leaf t)  = t
-treeToTExp (Node ts) = TupleT $ map treeToTExp ts
-
-mapTExp :: (IdentName -> IdentName) -> TExp -> TExp
-mapTExp f (IdentT n)    = IdentT (f n)
-mapTExp f (TupleT ts)   = TupleT $ map (mapTExp f) ts
-mapTExp f (GridT npk t) = GridT npk (mapTExp f t)
-mapTExp _ SomeType      = SomeType
 
 lookupIdent :: IdentName -> TransM (AlexPosn, [IdentName], Value)
 lookupIdent n = do
@@ -528,6 +472,7 @@ bindArgs ls r = do
 storeResult :: Tree (OMID,TExp) -> TransM ()
 storeResult res = do
   vs <- map fst <$> reader gVariables
+  -- FIXME: 変数名に _next を付与
   zipWithM_ (\(i,_) v -> insertNode (Store v i) (IdentT "void") []) (flatten res) vs
 
 isNumType :: TExp -> Bool
@@ -557,10 +502,13 @@ isExternFunc n = do
     -- ^ FIXME: ほんとは型もチェックするべき
     Nothing     -> False
 
-updateAnnots :: MonadState OMGraph m => [Annot] -> Tree (OMID,TExp) -> m ()
-updateAnnots as ids = mapM_ addAnnots (flatten ids)
+updateAnnots :: IdentName -> Tree (OMID,TExp) -> TransM ()
+updateAnnots n ids = do
+  b <- isManifest n
+  let as = if b then [SourceName n, ManifestNode] else [SourceName n]
+  mapM_ (addAnnots as) (flatten ids)
   where
-    addAnnots (i,_) = modify' (\g -> M.adjust (\n -> n { annot = as }) i g)
+    addAnnots as (i,_) = modify' (\g -> M.adjust (\node -> node { annot = as }) i g)
 
 expectType :: TExp -> TExp -> TransM TExp
 expectType t1 SomeType = return t1
@@ -587,8 +535,3 @@ inferType op t | isArith op = if isNumType t then return t else reportError $ "i
                                _           -> reportError "bug in inferType"
   where
     isArith o = o `elem` [Add,Sub,Mul,Div,Pow]
-
--- | グローバル関数の型検査
---   init, step, first_step, filter の引数と返り値の型が一致しているか確認する
-globalTypeCheck :: Program -> Either String ()
-globalTypeCheck = undefined
