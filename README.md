@@ -60,6 +60,7 @@ make run
 
 # Documents
 
+- [About](./doc/about.md)
 - [Tutorial](./doc/tutorial.pdf)
 - [サンプルコード解説](./doc/sample_description.pdf)
 
