@@ -15,6 +15,7 @@ import           Control.Monad.State.Strict
 import           Data.Bifunctor (bimap)
 import           Data.Hashable (Hashable)
 import qualified Data.HashMap.Strict as HM
+import qualified Data.IntMap.Strict as IM
 import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Ratio
@@ -154,7 +155,18 @@ genOMProgram prog cfg = do
 -- - また、袖領域を通信するときにすべてのグローバル変数をまとめて送りたい
 -- ためである。
 calcSleeve :: OMGraph -> Int
-calcSleeve = undefined
+calcSleeve g = getMax tbl
+  where
+    getMax = maximum . IM.foldl (\x y -> max <$> x <*> y) (vec [0,0,0])
+
+    tbl = M.foldlWithKey makeTbl IM.empty g
+
+    -- ここの処理において、ある OMID の OMInst が含む OMID は、その OMID より小さいことを仮定している
+    makeTbl acc oid (OMNode {inst = Load d i}) = IM.insert oid ((+) <$> d <*> tbl IM.! i) acc
+    makeTbl acc oid (OMNode {inst = Uniop _ i}) = IM.insert oid (tbl IM.! i) acc
+    makeTbl acc oid (OMNode {inst = Binop _ i1 i2}) = IM.insert oid (max <$> tbl IM.! i1 <*> tbl IM.! i2) acc
+    makeTbl acc oid (OMNode {inst = If i1 i2 i3}) = IM.insert oid (foldr (\x y -> max <$> x <*> y) (vec [0,0,0]) [tbl IM.! i1, tbl IM.! i2, tbl IM.! i3]) acc
+    makeTbl acc oid _ = IM.insert oid (vec [0,0,0]) acc
 
 makeIdentTable :: MonadError TransError m => Program -> m IdentTable
 makeIdentTable prog = return $ HM.fromList [ (n,(p,idx,ValueR e)) | VarDecl p l r <- prog, (n,!idx,e) <- unwrap l r]
