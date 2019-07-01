@@ -36,7 +36,7 @@ import Formura0.Vec
 -- で旧実装に変換して、さらに後ろの処理へ流す
 
 data Value = ValueR RExp
-           -- ^ グルーバルな変数定義やローカルな変数定義の識別子の値
+           -- ^ グローバルな変数定義やローカルな変数定義の識別子の値
            | ValueI !Int
            -- ^ グリッド型の識別子の値
            | ValueN (Tree (OMID,TExp))
