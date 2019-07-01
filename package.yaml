@@ -17,6 +17,7 @@ dependencies:
 - ansi-wl-pprint
 - bytestring
 - containers
+- filepath
 - lens
 - mtl
 - scientific
@@ -57,6 +58,13 @@ library:
 executables:
   formura:
     main: formura.hs
+    source-dirs: app
+    ghc-options:
+    - -rtsopts
+    dependencies:
+    - formura
+  formura0:
+    main: formura0.hs
     source-dirs: app
     ghc-options:
     - -rtsopts

@@ -43,7 +43,7 @@ data OMProgram = OMProgram
   , firstStepGraph         :: Maybe OMGraph
   , filterGraph            :: Maybe OMGraph
   , stepGraph              :: OMGraph
-  }
+  } deriving (Show)
 
 -- OMGraph に関する操作
 --  - AST から Graph を構築する
