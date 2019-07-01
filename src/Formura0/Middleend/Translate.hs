@@ -146,6 +146,13 @@ genOMProgram prog cfg = do
     , firstStepGraph = fsg
     }
 
+-- |
+-- calcSleeve はグラフの袖サイズを計算する
+-- 本来は、グローバル変数ごとにベクトル量として得られるが、最大のものを選びスカラーにする
+-- これは、
+-- - 大体の場合において、どのグローバル変数のどの方向においても袖サイズは一致する
+-- - また、袖領域を通信するときにすべてのグローバル変数をまとめて送りたい
+-- ためである。
 calcSleeve :: OMGraph -> Int
 calcSleeve = undefined
 
@@ -260,7 +267,7 @@ translate iTbl tTbl vs (p,b,xs) = do
     storeResult res
 
 -- |
--- TransM の状態である OMGraph に変更を行うのは insertNode 関数のみ
+-- TransM の状態である OMGraph に変更を行うのは insertNode 関数と updateAnnots 関数のみである
 insertNode :: MonadState OMGraph m => OMInst -> TExp -> [Annot] -> m (OMID, TExp)
 insertNode i t as = do
   g <- get
@@ -271,6 +278,14 @@ insertNode i t as = do
                     }
   put $! M.insert omid node g
   return $ (omid, t)
+
+updateAnnots :: IdentName -> Tree (OMID,TExp) -> TransM ()
+updateAnnots n ids = do
+  b <- isManifest n
+  let as = if b then [SourceName n, ManifestNode] else [SourceName n]
+  mapM_ (addAnnots as) (flatten ids)
+  where
+    addAnnots as (i,_) = modify' (\g -> M.adjust (\node -> node { annot = as }) i g)
 
 
 -- |
@@ -507,14 +522,6 @@ isExternFunc n = do
     Just (ms,_) -> TMExtern `elem` ms
     -- ^ FIXME: ほんとは型もチェックするべき
     Nothing     -> False
-
-updateAnnots :: IdentName -> Tree (OMID,TExp) -> TransM ()
-updateAnnots n ids = do
-  b <- isManifest n
-  let as = if b then [SourceName n, ManifestNode] else [SourceName n]
-  mapM_ (addAnnots as) (flatten ids)
-  where
-    addAnnots as (i,_) = modify' (\g -> M.adjust (\node -> node { annot = as }) i g)
 
 expectType :: TExp -> TExp -> TransM TExp
 expectType t1 SomeType = return t1
