@@ -90,7 +90,7 @@ decls : decl                                     { $1 }
       | decls ';' decl                           { $1 <> $3 }
 
 decl : texp "::" exps                            { map (unwrapExp $1 (getPos $2)) $3 }
-     | exp '=' rexp                              { [TypeDecl (getPos $2) (ModifiedType [] None) $1, VarDecl (getPos $2) $1 $3] }
+     | exp '=' rexp                              { [VarDecl (getPos $2) $1 $3] }
      |                                           { [] }
 
 exps : exp0                                      { $1 }
