@@ -8,10 +8,11 @@ import Formura0.Syntax
 import Formura0.Vec
 
 type OMID = Int
+type GVID = Int -- Global variables' ID
 
 data OMInst = Load !(Vec Int) !OMID
-            | Store !IdentName !OMID
-            | LoadGlobal !(Vec Int) !IdentName
+            | Store !GVID !OMID
+            | LoadGlobal !(Vec Int) !GVID
             | LoadIndex !Int
             | Uniop !Op1 !OMID
             | Binop !Op2 !OMID !OMID

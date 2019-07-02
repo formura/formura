@@ -18,7 +18,6 @@ import           Data.Hashable (Hashable)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
-import           Data.Maybe
 import           Data.Ratio
 import qualified Data.Text as T
 
@@ -43,6 +42,8 @@ data Value = ValueR RExp
            -- ^ グリッド型の識別子の値
            | ValueN (Tree (OMID,TExp))
            -- ^ 関数の仮引数の識別子の値
+           | ValueG !GVID !TExp
+           -- ^ グローバル変数の実体
   deriving (Eq,Show)
 
 -- [IdentName] はグリッドのインデックス
@@ -70,10 +71,13 @@ zipWithTreeM f (Node xs) y@(Leaf _) = Node <$> mapM (\x -> zipWithTreeM f x y) x
 zipWithTreeM f (Node xs) (Node ys) | length xs == length ys = Node <$> zipWithM (zipWithTreeM f) xs ys
                                    | otherwise = throwError "tree mismatch"
 
+treeToTExp :: Tree (OMID,TExp) -> TExp
+treeToTExp (Leaf (_,t)) = t
+treeToTExp (Node xs)    = TupleT $ map treeToTExp xs
+
 data Env = Env
   { identTable :: !IdentTable
   , typeTable  :: !TypeTable
-  , gVariables :: !GlobalVariables
   , sourcePos  :: !AlexPosn
   } deriving (Show)
 
@@ -86,10 +90,10 @@ newtype TransM a = TransM { runTrans :: ReaderT Env (StateT OMGraph (Either Tran
            , MonadError TransError
            )
 
-run :: IdentTable -> TypeTable -> GlobalVariables -> AlexPosn -> TransM a -> Either TransError OMGraph
-run iTbl tTbl vs p act = execStateT (runReaderT (runTrans act) env) M.empty
+run :: IdentTable -> TypeTable -> AlexPosn -> TransM a -> Either TransError (a, OMGraph)
+run iTbl tTbl p act = runStateT (runReaderT (runTrans act) env) M.empty
   where
-    env = Env iTbl tTbl vs p
+    env = Env iTbl tTbl p
 
 reportError :: TransError -> TransM a
 reportError msg = do
@@ -130,11 +134,10 @@ genOMProgram prog cfg = do
   iTbl1 <- makeIdentTable prog
   tTbl <- makeTypeTable prog
   let iTbl = iTbl0 <> iTbl1
-  vs <- findGlobalVariables iTbl
-  ig <- buildGraph iTbl tTbl vs "init"
-  sg <- buildGraph iTbl tTbl vs "step"
-  fsg <- buildGraph' iTbl tTbl vs "first_step"
-  flg <- buildGraph' iTbl tTbl vs "filter"
+  (ts,ig) <- buildGraph iTbl tTbl (TupleT []) (\_ _ ((t,_),g) -> return (t,g)) "init"
+  (vs,sg) <- buildGraph iTbl tTbl ts validateRes "step"
+  fsg <- fmap snd <$> buildGraph' iTbl tTbl ts validateRes "first_step"
+  flg <- fmap snd <$> buildGraph' iTbl tTbl ts validateRes "filter"
 
   cfg' <- bimap show id $ convertConfig (calcSleeve sg) (calcSleeve <$> fsg) (calcSleeve <$> flg) cfg
   return OMProgram
@@ -206,32 +209,6 @@ makeTypeTable prog = return $ HM.fromList [ (n,(ms,t')) | (TypeDecl _ (ModifiedT
     unwrap (TupleL xs) SomeType    = concat [unwrap x SomeType | x <- xs]
     unwrap _ _                     = error "error" -- FIX ME
 
-findGlobalVariables :: IdentTable -> Either String [(IdentName,TExp)]
-findGlobalVariables tbl =
-  case HM.lookup "init" tbl of
-    Nothing              -> Left "Error: Not found init function"
-    Just (p,_,ValueR (LambdaR _ r)) ->
-      case r of
-        (LetR b (IdentR x)) -> do
-          tt <- makeTypeTable b
-          t <- typeOf x tt
-          return [(x, t)]
-        (LetR b (TupleR xs)) -> do
-          tt <- makeTypeTable b
-          xs' <- unwrap xs
-          ts <- sequence [typeOf x tt | x <- xs']
-          return $ zip xs' ts
-        _ -> Left $ "Error: " ++ formatPos p ++ " init must return a tuple of grid"
-    Just (p,_,_)           -> Left $ "Error:" ++ formatPos p ++ " init must be a function"
-  where
-    typeOf n tTbl = case HM.lookup n tTbl of
-                      Nothing -> Left $ "Not found " ++ show (T.unpack n)
-                      Just t  -> Right (snd t)
-
-    unwrap xs = case [n | (IdentR n) <- xs] of
-                  ys | length ys == length xs -> Right ys
-                     | otherwise -> Left "init must return a tuple of grid"
-
 selectSpecialDecl :: Program -> [SpecialDeclaration]
 selectSpecialDecl prog = [ s | (SpcDecl _ s) <- prog ]
 
@@ -260,46 +237,55 @@ getGSInstanceName sp = case [ n | (GSInstanceName n) <- sp ] of
                          []  -> Right "formura_data"
                          _   -> Left "Multiple instance name declaration"
 
-buildGraph :: IdentTable -> TypeTable -> GlobalVariables -> IdentName -> Either String OMGraph
-buildGraph iTbl tTbl vs name = do
-  mgraph <- buildGraph' iTbl tTbl vs name
+buildGraph :: IdentTable -> TypeTable -> TExp
+           -> (IdentName -> TExp -> ((TExp,GlobalVariables),OMGraph) -> Either String (a,OMGraph))
+           -> IdentName -> Either String (a,OMGraph)
+buildGraph iTbl tTbl ts postTrans name = do
+  mgraph <- buildGraph' iTbl tTbl ts postTrans name
   case mgraph of
     Just g  -> Right g
     Nothing -> Left $ "Not found " ++ show (T.unpack name) ++ " function"
 
-buildGraph' :: IdentTable -> TypeTable -> GlobalVariables -> IdentName -> Either String (Maybe OMGraph)
-buildGraph' iTbl tTbl vs name = sequence $ (translate iTbl tTbl vs <=< validate name (map snd vs)) <$> HM.lookup name iTbl
+buildGraph' :: IdentTable -> TypeTable -> TExp
+            -> (IdentName -> TExp -> ((TExp,GlobalVariables),OMGraph) -> Either String (a,OMGraph))
+            -> IdentName -> Either String (Maybe (a,OMGraph))
+buildGraph' iTbl tTbl ts postTrans name = sequence $ (postTrans name ts <=< translate iTbl tTbl <=< validateValue name ts) <$> HM.lookup name iTbl
+
+validateValue :: IdentName -> TExp -> (AlexPosn,[IdentName],Value) -> Either String (AlexPosn,GlobalVariables,Program,RExp)
+validateValue n t0 (p,_,ValueR (LambdaR args (LetR b xs))) = do
+  vs <- match t0 (TupleL args)
+  return (p,vs,b,xs)
+
+  where
+    isNotTuple (TupleT _) = False
+    isNotTuple _          = True
+
+    match (TupleT ts) (TupleL ls) | length ts == length ls = concat <$> zipWithM match ts ls
+    match t (TupleL [l]) | isNotTuple t = match t l
+    match t (IdentL l) | isNotTuple t = return [(l,t)]
+    match _ _ = Left $ "Error: the arguments of " ++ T.unpack n ++ " must be " ++ show t0
+
+validateValue n _ _ = Left $ "Error: " ++ T.unpack n ++ "is not a function which returns let-exp"
 
 -- |
--- validate は
--- - 関数かどうか
--- - 引数と返り値が適切な数か
--- を検証する
-validate :: IdentName -> [TExp] -> (AlexPosn,[IdentName],Value) -> Either String (AlexPosn,Program,RExp)
-validate f ts (p,_,ValueR (LambdaR args (LetR b xs))) | validArg && validRes = return (p,b,xs)
-                                                      | otherwise = Left $ "The number of (arguments|returned values) of " ++ (T.unpack f) ++ " is not equal to the number of global variables"
-  where
-    nt = length ts
-    validArg = length args == (if f == "init" then 0 else nt)
-    validRes = case xs of
-                 IdentR _  -> nt == 1
-                 TupleR rs -> nt == length rs
-                 _         -> False
-validate f _ _ = Left $ (T.unpack f) ++ " is not a function"
+-- validateRes は、グローバル関数の返り値の型が init と一致するか検証する
+validateRes :: IdentName -> TExp -> ((TExp,GlobalVariables),OMGraph) -> Either String (GlobalVariables,OMGraph)
+validateRes n t0 ((t1,vs),g) = if t0 == t1 then return (vs,g) else Left $ "Error: the return type of " ++ T.unpack n ++ " (" ++ show t1 ++ ")" ++ " must match the return type of init (" ++ show t0 ++ ")"
 
 -- |
 -- translate の仕様
 --
 -- ターゲットの関数のローカルな IdentTable と TypeTable を構築して、
 -- trans 関数と storeResult 関数でグラフを構築する
-translate :: IdentTable -> TypeTable -> GlobalVariables -> (AlexPosn,Program,RExp) -> Either String OMGraph
-translate iTbl tTbl vs (p,b,xs) = do
-  iTbl' <- makeIdentTable b
-  tTbl' <- makeTypeTable b
-  run (iTbl' |+> iTbl) (tTbl' |+> tTbl) vs p $ do
+translate :: IdentTable -> TypeTable -> (AlexPosn,GlobalVariables,Program,RExp) -> Either String ((TExp,GlobalVariables),OMGraph)
+translate iTblG tTblG (p,vs,b,xs) = do
+  let iTblA = HM.fromList [(n,(p,[],ValueG i t)) | ((n,t),i) <- zip vs [0..]]
+  iTblL <- makeIdentTable b
+  tTblL <- makeTypeTable b
+  run (iTblL |+> iTblA |+> iTblG) (tTblL |+> tTblG) p $ do
     res <- trans SomeType xs
-    -- FIXME: res と vs を比較して型が一致するかを調べる
     storeResult res
+    return $ (treeToTExp res,vs)
 
 -- |
 -- TransM の状態である OMGraph に変更を行うのは insertNode 関数と updateAnnots 関数のみである
@@ -347,16 +333,12 @@ updateAnnots n ids = do
 -- また、Tree a 型がタプルの構造を保存するため、決定されたノード型は IdentT か GridT である (はず)。
 trans :: TExp -> RExp -> TransM (Tree (OMID, TExp))
 trans t (IdentR n) = do
-  vs <- reader gVariables
-  if n `elem` (map fst vs)
-     then Leaf <$> insertNode (LoadGlobal (vec [0,0,0]) n) (fromJust $ lookup n vs) [SourceName n]
-     else do
-       v <- lookupIdent n
-       t' <- lookupType n
-       t0 <- expectType t t'
-       res <- transValue t0 v
-       updateAnnots n res
-       return res
+  v <- lookupIdent n
+  t' <- lookupType n
+  t0 <- expectType t t'
+  res <- transValue t0 v
+  updateAnnots n res
+  return res
 trans SomeType (ImmR x) = Leaf <$> insertNode (Imm x) (if denominator x == 1 then IdentT "int" else IdentT "float") [] -- FIXME: とりあえずの実装
 trans t (ImmR x) =
   if not (isNumType t)
@@ -418,9 +400,10 @@ trans t (AppR r1 r2) =
 transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
 transValue t0 (p,idx,v) =
   case v of
-    ValueR r  -> local (updateEnv p idx) $ trans t0 r
-    ValueN xs -> return xs
-    ValueI i  -> Leaf <$> insertNode (LoadIndex i) (IdentT "int") []
+    ValueR r   -> local (updateEnv p idx) $ trans t0 r
+    ValueN xs  -> return xs
+    ValueI i   -> Leaf <$> insertNode (LoadIndex i) (IdentT "int") []
+    ValueG i t -> Leaf <$> insertNode (LoadGlobal (vec [0,0,0]) i) t []
 
   where
     updateEnv p1 ns e = let iTbl = HM.fromList [(n,(p1,[],ValueI x)) | (n,x) <- zip ns [0..]]
@@ -526,10 +509,8 @@ bindArgs ls r = do
     makeIdentTable' _ _ _ = reportError "tuple length mismatch"
 
 storeResult :: Tree (OMID,TExp) -> TransM ()
-storeResult res = do
-  vs <- map fst <$> reader gVariables
-  -- FIXME: 変数名に _next を付与
-  zipWithM_ (\(i,_) v -> insertNode (Store v i) (IdentT "void") []) (flatten res) vs
+storeResult res =
+  zipWithM_ (\(i,_) v -> insertNode (Store v i) (IdentT "void") []) (flatten res) [0..]
 
 isNumType :: TExp -> Bool
 isNumType (IdentT t)  = t `notElem` ["bool", "string"]
