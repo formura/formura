@@ -13,9 +13,10 @@ import           Control.Monad.Except
 import           Control.Monad.Reader
 import           Control.Monad.State.Strict
 import           Data.Bifunctor (bimap)
+import           Data.Foldable (toList)
 import           Data.Hashable (Hashable)
 import qualified Data.HashMap.Strict as HM
-import qualified Data.IntMap.Strict as IM
+import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Ratio
@@ -23,7 +24,7 @@ import qualified Data.Text as T
 
 import Formura.NumericalConfig
 import Formura0.Annotation
-import Formura0.Frontend.Lexer (AlexPosn)
+import Formura0.Frontend.Lexer (AlexPosn(..))
 import Formura0.OMGraph
 import Formura0.Syntax
 import Formura0.Utils
@@ -114,14 +115,6 @@ reportError msg = do
 -- - numerical config の検証と変換をする
 genOMProgram :: Program -> NumericalConfig -> Either String OMProgram
 genOMProgram prog cfg = do
-  iTbl <- makeIdentTable prog
-  tTbl <- makeTypeTable prog
-  vs <- findGlobalVariables iTbl
-  ig <- buildGraph iTbl tTbl vs "init"
-  sg <- buildGraph iTbl tTbl vs "step"
-  fsg <- buildGraph' iTbl tTbl vs "first_step"
-  flg <- buildGraph' iTbl tTbl vs "filter"
-
   let sp = selectSpecialDecl prog
   dim <- getDim sp
   axes <- getAxes sp dim
@@ -131,6 +124,17 @@ genOMProgram prog cfg = do
             | dim == 2 = [[1,0],[0,1],[1,1]]
             | dim == 3 = [[1,0,0],[0,1,0],[0,0,1],[1,1,0],[1,0,1],[0,1,1],[1,1,1]]
             | otherwise = error "Not support"
+
+  let iTbl0 = makeImplicitBindings axes cfg
+
+  iTbl1 <- makeIdentTable prog
+  tTbl <- makeTypeTable prog
+  let iTbl = iTbl0 <> iTbl1
+  vs <- findGlobalVariables iTbl
+  ig <- buildGraph iTbl tTbl vs "init"
+  sg <- buildGraph iTbl tTbl vs "step"
+  fsg <- buildGraph' iTbl tTbl vs "first_step"
+  flg <- buildGraph' iTbl tTbl vs "filter"
 
   cfg' <- bimap show id $ convertConfig (calcSleeve sg) (calcSleeve <$> fsg) (calcSleeve <$> flg) cfg
   return OMProgram
@@ -159,6 +163,7 @@ calcSleeve g = getMax tbl
   where
     getMax = maximum . IM.foldl (\x y -> max <$> x <*> y) (vec [0,0,0])
 
+    -- tbl の構築は、遅延評価を活かしているため正格なデータ構造を使うと無限ループになる
     tbl = M.foldlWithKey makeTbl IM.empty g
 
     -- ここの処理において、ある OMID の OMInst が含む OMID は、その OMID より小さいことを仮定している
@@ -167,6 +172,23 @@ calcSleeve g = getMax tbl
     makeTbl acc oid (OMNode {inst = Binop _ i1 i2}) = IM.insert oid (max <$> tbl IM.! i1 <*> tbl IM.! i2) acc
     makeTbl acc oid (OMNode {inst = If i1 i2 i3}) = IM.insert oid (foldr (\x y -> max <$> x <*> y) (vec [0,0,0]) [tbl IM.! i1, tbl IM.! i2, tbl IM.! i3]) acc
     makeTbl acc oid _ = IM.insert oid (vec [0,0,0]) acc
+
+-- |
+-- makeImplicitBindings は
+-- - dx, dy, dz
+-- - total_grid_x, total_grid_y, total_grid_z
+-- を束縛する (軸名が x,y,z の場合)
+makeImplicitBindings :: [IdentName] -> NumericalConfig -> IdentTable
+makeImplicitBindings as cfg = HM.fromList $ spacialIntervals <> totalGrids
+  where
+    imm i = (AlexPn 1 1 1,[],ValueR (ImmR i))
+    ls = map toRational $ toList $ _ncLengthPerNode cfg
+    ns = toList $ _ncGridPerNode cfg
+    ms = maybe [1,1,1] toList $ _ncMPIShape cfg
+    ds = zipWith (\l n -> (numerator l) % ((denominator l) * fromIntegral n)) ls ns
+    gs = zipWith (\n m -> fromIntegral (n * m)) ns ms
+    spacialIntervals = zipWith (\a i -> ("d" <> a, imm i)) as ds
+    totalGrids = zipWith (\a i -> ("total_grid_" <> a, imm i)) as gs
 
 makeIdentTable :: MonadError TransError m => Program -> m IdentTable
 makeIdentTable prog = return $ HM.fromList [ (n,(p,idx,ValueR e)) | VarDecl p l r <- prog, (n,!idx,e) <- unwrap l r]
@@ -275,7 +297,8 @@ translate iTbl tTbl vs (p,b,xs) = do
   iTbl' <- makeIdentTable b
   tTbl' <- makeTypeTable b
   run (iTbl' |+> iTbl) (tTbl' |+> tTbl) vs p $ do
-    res <- trans (TupleT $ map snd vs) xs
+    res <- trans SomeType xs
+    -- FIXME: res と vs を比較して型が一致するかを調べる
     storeResult res
 
 -- |
