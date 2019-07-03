@@ -381,7 +381,7 @@ trans t (AppR r1 r2) =
     IdentR n -> do
       b <- isExternFunc n
       if b
-        then transExternFunc n r2
+        then transExternFunc t n r2
         else do
           (p1,_,r) <- lookupIdent n
           case r of
@@ -449,9 +449,9 @@ transIf x1 x2 x3 = do
 --
 -- v2.3 までは、スカラー関数のみを扱ってきた
 -- そのふるまいを継承する
-transExternFunc :: IdentName -> RExp -> TransM (Tree (OMID,TExp))
-transExternFunc fn r = do
-  res <- trans SomeType r
+transExternFunc :: TExp -> IdentName -> RExp -> TransM (Tree (OMID,TExp))
+transExternFunc t0 fn r = do
+  res <- trans t0 r
   mapM (\(i,t) -> insertNode (Call1 fn [i]) t []) res
 
 lookupIdent :: IdentName -> TransM (AlexPosn, [IdentName], Value)
