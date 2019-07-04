@@ -390,8 +390,10 @@ trans t (AppR r1 r2) =
             _                -> reportError $ "invalid type: " ++ show (T.unpack n) ++ " is not appliable"
     TupleR xs   -> evalToInt r2 >>= nthOfTuple xs >>= trans t
     LambdaR l r -> do
-      iTbl <- bindArgs l r2
-      local (\e -> e { identTable = iTbl |+> identTable e }) $ trans t r
+      p <- reader sourcePos
+      let (l',r') = renameArgs p l r
+      iTbl <- bindArgs l' r2
+      local (\e -> e { identTable = iTbl |+> identTable e }) $ trans t r'
     _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
 
   where
@@ -476,6 +478,43 @@ evalToInt (IdentR n) = do
     ValueR r -> local (\e -> e { sourcePos = p }) $ evalToInt r
     _        -> reportError $ show (T.unpack n) ++ " is not integer"
 evalToInt r = reportError $ show r ++ " is not integer"
+
+-- |
+-- renameArgs は、関数の仮引数を一意な名前に変更する
+--
+-- 識別子 x を x@p と変換する。
+-- ここで p は、ソースコードにおける行頭からの文字数である。
+-- @ は識別子の要素ではないため、ユーザーが定義した別の識別子と衝突することはない。
+renameArgs :: AlexPosn -> [LExp] -> RExp -> ([LExp],RExp)
+renameArgs (AlexPn pos _ _) args body = (map renameL args, renameR body)
+  where
+    newIdentOf n = n <> T.pack ("@" ++ show pos)
+
+    idents (IdentL n)  = [n]
+    idents (TupleL xs) = concatMap idents xs
+    idents (GridL _ x) = idents x
+
+    isArg n = n `elem` (concatMap idents args)
+
+    renameL (IdentL n)  | isArg n = IdentL (newIdentOf n)
+    renameL (TupleL xs) = TupleL (map renameL xs)
+    renameL (GridL i x) = GridL i (renameL x)
+    renameL x           = x
+
+    renameR (IdentR n)        | isArg n = IdentR (newIdentOf n)
+    renameR (TupleR xs)       = TupleR (map renameR xs)
+    renameR (GridR i x)       = GridR i (renameR x)
+    renameR (UniopR op x)     = UniopR op (renameR x)
+    renameR (BinopR op x1 x2) = BinopR op (renameR x1) (renameR x2)
+    renameR (IfR x1 x2 x3)    = IfR (renameR x1) (renameR x2) (renameR x3)
+    renameR (LetR b x)        = LetR (map renameS b) (renameR x)
+    renameR (LambdaR as x)    = LambdaR (map renameL as) (renameR x)
+    renameR (AppR x1 x2)      = AppR (renameR x1) (renameR x2)
+    renameR x                 = x
+
+    renameS (TypeDecl p t l) = TypeDecl p t (renameL l)
+    renameS (VarDecl p l r)  = VarDecl p (renameL l) (renameR r)
+    renameS x                = x
 
 -- |
 -- bindArgs の仕様
