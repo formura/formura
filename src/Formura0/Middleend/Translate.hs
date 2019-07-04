@@ -17,6 +17,7 @@ import           Data.Foldable (toList)
 import           Data.Hashable (Hashable)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.IntMap as IM
+import           Data.List (intercalate)
 import qualified Data.Map as M
 import           Data.Ratio
 import qualified Data.Text as T
@@ -79,6 +80,7 @@ data Env = Env
   { identTable :: !IdentTable
   , typeTable  :: !TypeTable
   , sourcePos  :: !AlexPosn
+  , traceLog   :: ![(AlexPosn,IdentName)]
   } deriving (Show)
 
 type TransError = String
@@ -90,10 +92,10 @@ newtype TransM a = TransM { runTrans :: ReaderT Env (StateT OMGraph (Either Tran
            , MonadError TransError
            )
 
-run :: IdentTable -> TypeTable -> AlexPosn -> TransM a -> Either TransError (a, OMGraph)
-run iTbl tTbl p act = runStateT (runReaderT (runTrans act) env) M.empty
+run :: IdentTable -> TypeTable -> AlexPosn -> IdentName -> TransM a -> Either TransError (a, OMGraph)
+run iTbl tTbl p n act = runStateT (runReaderT (runTrans act) env) M.empty
   where
-    env = Env iTbl tTbl p
+    env = Env iTbl tTbl p [(p,n)]
 
 reportError :: TransError -> TransM a
 reportError msg = do
@@ -101,13 +103,19 @@ reportError msg = do
   g <- get
   throwError $
     unlines [ "Error: " ++ formatPos (sourcePos e) ++ " " ++ msg
-            , "  reported in translate"
+            , "  reported in building an OM graph"
+            , ""
+            , "  stack trace:"
+            , "    " ++ showTraceLog (traceLog e)
+            , ""
             , "  env:"
             , "    " ++ show e
             , ""
             , "  graph:"
             , "    " ++ show g
             ]
+  where
+    showTraceLog xs = intercalate " |> " [T.unpack n ++ " (" ++ formatPos p ++ ")" | (p,n) <- reverse xs]
 
 -- |
 -- genOMProgram の仕様
@@ -251,10 +259,10 @@ buildGraph' :: IdentTable -> TypeTable -> TExp
             -> IdentName -> Either String (Maybe (a,OMGraph))
 buildGraph' iTbl tTbl ts postTrans name = sequence $ (postTrans name ts <=< translate iTbl tTbl <=< validateValue name ts) <$> HM.lookup name iTbl
 
-validateValue :: IdentName -> TExp -> (AlexPosn,[IdentName],Value) -> Either String (AlexPosn,GlobalVariables,Program,RExp)
+validateValue :: IdentName -> TExp -> (AlexPosn,[IdentName],Value) -> Either String (IdentName,AlexPosn,GlobalVariables,Program,RExp)
 validateValue n t0 (p,_,ValueR (LambdaR args (LetR b xs))) = do
   vs <- match t0 (TupleL args)
-  return (p,vs,b,xs)
+  return (n,p,vs,b,xs)
 
   where
     isNotTuple (TupleT _) = False
@@ -277,12 +285,12 @@ validateRes n t0 ((t1,vs),g) = if t0 == t1 then return (vs,g) else Left $ "Error
 --
 -- ターゲットの関数のローカルな IdentTable と TypeTable を構築して、
 -- trans 関数と storeResult 関数でグラフを構築する
-translate :: IdentTable -> TypeTable -> (AlexPosn,GlobalVariables,Program,RExp) -> Either String ((TExp,GlobalVariables),OMGraph)
-translate iTblG tTblG (p,vs,b,xs) = do
+translate :: IdentTable -> TypeTable -> (IdentName,AlexPosn,GlobalVariables,Program,RExp) -> Either String ((TExp,GlobalVariables),OMGraph)
+translate iTblG tTblG (fn,p,vs,b,xs) = do
   let iTblA = HM.fromList [(n,(p,[],ValueG i t)) | ((n,t),i) <- zip vs [0..]]
   iTblL <- makeIdentTable b
   tTblL <- makeTypeTable b
-  run (iTblL |+> iTblA |+> iTblG) (tTblL |+> tTblG) p $ do
+  run (iTblL |+> iTblA |+> iTblG) (tTblL |+> tTblG) p fn $ do
     res <- trans SomeType xs
     storeResult res
     return $ (treeToTExp res,vs)
@@ -336,7 +344,7 @@ trans t (IdentR n) = do
   v <- lookupIdent n
   t' <- lookupType n
   t0 <- expectType t t'
-  res <- transValue t0 v
+  res <- transValue t0 n v
   updateAnnots n res
   return res
 trans SomeType (ImmR x) = Leaf <$> insertNode (Imm x) (if denominator x == 1 then IdentT "int" else IdentT "float") [] -- FIXME: とりあえずの実装
@@ -384,14 +392,17 @@ trans t (AppR r1 r2) =
         then transExternFunc t n r2
         else do
           (p1,_,r) <- lookupIdent n
+          let newEnv e = e { sourcePos = p1
+                           , traceLog = (p1,n):traceLog e
+                           }
           case r of
-            ValueR r'        -> local (\e -> e { sourcePos = p1 }) $ trans t (AppR r' r2)
+            ValueR r'        -> local newEnv $ trans t (AppR r' r2)
             ValueN (Node xs) -> evalToInt r2 >>= nthOfTuple xs
             _                -> reportError $ "invalid type: " ++ show (T.unpack n) ++ " is not appliable"
     TupleR xs   -> evalToInt r2 >>= nthOfTuple xs >>= trans t
     LambdaR l r -> do
       p <- reader sourcePos
-      let (l',r') = renameArgs p l r
+      let (!l',!r') = renameArgs p l r
       iTbl <- bindArgs l' r2
       local (\e -> e { identTable = iTbl |+> identTable e }) $ trans t r'
     _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
@@ -399,19 +410,20 @@ trans t (AppR r1 r2) =
   where
     nthOfTuple xs i = if i >= 0 && i < length xs then return (xs !! i) else reportError $ "out-of-range tuple index: " ++ show i
 
-transValue :: TExp -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
-transValue t0 (p,idx,v) =
+transValue :: TExp -> IdentName -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
+transValue t0 name (p,idx,v) =
   case v of
-    ValueR r   -> local (updateEnv p idx) $ trans t0 r
+    ValueR r   -> local newEnv $ trans t0 r
     ValueN xs  -> return xs
     ValueI i   -> Leaf <$> insertNode (LoadIndex i) (IdentT "int") []
     ValueG i t -> Leaf <$> insertNode (LoadGlobal (vec [0,0,0]) i) t []
 
   where
-    updateEnv p1 ns e = let iTbl = HM.fromList [(n,(p1,[],ValueI x)) | (n,x) <- zip ns [0..]]
-                        in e { identTable = iTbl |+> identTable e
-                             , sourcePos = p1
-                             }
+    newEnv e = let iTbl = HM.fromList [(n,(p,[],ValueI x)) | (n,x) <- zip idx [0..]]
+                in e { identTable = iTbl |+> identTable e
+                     , sourcePos = p
+                     , traceLog = (p,name):traceLog e
+                     }
 
 transGrid :: Vec NPlusK -> (OMID,TExp) -> TransM (OMID,TExp)
 transGrid npk res@(i,t) =
