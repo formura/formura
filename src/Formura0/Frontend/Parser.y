@@ -160,7 +160,7 @@ rexp : rexp '+' rexp                             { Binop' Add $1 $3 }
      | fun '(' args ')' rexp                     { Lambda' $3 $5 }
      | if rexp then rexp else rexp               { If' $2 $4 $6 }
      | apply                                     { $1 }
-     | var '.' var                               { Lambda' [Ident "x"] (App' (Ident' $1) (App' (Ident' $3) (Ident' "x"))) }
+     | rexp '.' rexp                               { Lambda' [Ident "x"] (App' $1 (App' $3 (Ident' "x"))) }
 
 term : '(' rexp ')'                              { $2 }
      | var                                       { Ident' $1 }

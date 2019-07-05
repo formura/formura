@@ -53,6 +53,9 @@ spec = do
     it "check if expression" $
       parse "x = if a then b else c + d" `shouldBe`
         Right [ VarDecl (AlexPn 2 1 3) (Ident "x") (If' (Ident' "a") (Ident' "b") (Binop' Add (Ident' "c") (Ident' "d"))) ]
+    it "check function composition" $
+      parse "f = d_x . d_y . d_z" `shouldBe`
+        Right [ VarDecl (AlexPn 2 1 3) (Ident "f") (Lambda' [Ident "x"] (App' (Ident' "d_x") (App' (Lambda' [Ident "x"] (App' (Ident' "d_y") (App' (Ident' "d_z") (Ident' "x")))) (Ident' "x")))) ]
     it "check function application" $
       parse "y = f x\nz = g(1.0,a)\nw = (f.g)(1.0,a)" `shouldBe`
         Right [ VarDecl (AlexPn 2 1 3) (Ident "y") (App' (Ident' "f") (Ident' "x"))
