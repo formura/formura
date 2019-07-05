@@ -19,6 +19,7 @@ $whitespace = $white # $nl
 tokens :-
   $whitespace+                  ;
   \#~$nl*                       ;
+  \\$nl                         ;
   [$nl \;]+                     { withPos TokenEOS }
   =                             { withPos TokenEq }
   \.                            { withPos TokenCom }
