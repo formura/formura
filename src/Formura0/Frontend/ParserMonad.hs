@@ -17,7 +17,7 @@ alexGetPosition = Alex $ \s@AlexState{alex_pos=pos} -> Right (s, pos)
 happyError :: Parser a
 happyError = do
   (AlexPn _ l c) <- alexGetPosition
-  alexError $ "error at " ++ show (l,c)
+  alexError $ "parse error at line " ++ show l ++ " column " ++ show c
 
 lexer :: (TokenWithPos -> Parser a) -> Parser a
 lexer f = alexMonadScan >>= f
