@@ -80,6 +80,20 @@ spec = do
                                                                                 ]
                                                                                 (Tuple' [Ident' "u", Ident' "v"])))
               ]
+    it "check another function definition" $
+      parse "begin function f(a,b,c) returns x\nx = a*b + c\nend function\n\nbegin function (u,v) = init()\ndouble :: u = 0, v = 0\nend function" `shouldBe`
+        Right [ TypeDecl (AlexPn 0 1 1) (ModifiedType [] None) (Ident "f")
+              , VarDecl (AlexPn 0 1 1) (Ident "f") (Lambda' [Ident "a",Ident "b",Ident "c"]
+                                                            (Let' [ VarDecl (AlexPn 36 2 3) (Ident "x") (Binop' Add (Binop' Mul (Ident' "a") (Ident' "b")) (Ident' "c"))]
+                                                                  (Ident' "x")))
+              , TypeDecl (AlexPn 60 5 1) (ModifiedType [] None) (Ident "init")
+              , VarDecl (AlexPn 60 5 1) (Ident "init") (Lambda' [] (Let' [ TypeDecl (AlexPn 97 6 8) (ModifiedType [] (Ident "double")) (Ident "u")
+                                                                                , VarDecl (AlexPn 102 6 13) (Ident "u") (Imm' 0)
+                                                                                , TypeDecl (AlexPn 97 6 8) (ModifiedType [] (Ident "double")) (Ident "v")
+                                                                                , VarDecl (AlexPn 109 6 20) (Ident "v") (Imm' 0)
+                                                                                ]
+                                                                                (Tuple' [Ident' "u", Ident' "v"])))
+              ]
     it "check logical expression" $
       parse "max = fun(x,y) if x > y then x else y\nz = if (x >= 0) && (x <= 10) then 1 else 0" `shouldBe`
         Right [ VarDecl (AlexPn 4 1 5) (Ident "max") (Lambda' [Ident "x",Ident "y"] (If' (Binop' Gt (Ident' "x") (Ident' "y")) (Ident' "x") (Ident' "y")))

@@ -56,6 +56,7 @@ import Formura0.Syntax
   begin                     { TokenWith _ TokenBegin }
   end                       { TokenWith _ TokenEnd }
   function                  { TokenWith _ TokenFunction }
+  returns                   { TokenWith _ TokenReturns }
 
 %right in
 %nonassoc "==" "!=" '<' "<=" '>' ">="
@@ -84,7 +85,8 @@ specialDecl : dimension "::" int                 { [SpcDecl (getPos $1) (Dimensi
 axesLabels : var                                 { [$1] }
            | axesLabels ',' var                  { $1 <> [$3] }
 
-functionDef : begin function rexp '=' var '(' args ')' ';' decls ';' end function { [TypeDecl (getPos $1) (ModifiedType [] None) (Ident $5), VarDecl (getPos $1) (Ident $5) (Lambda' $7 (Let' $10 $3)) ] }
+functionDef : begin function rexp '=' var '(' args ')' ';' decls ';' end function { [TypeDecl (getPos $1) (ModifiedType [] None) (Ident $5), VarDecl (getPos $1) (Ident $5) (Lambda' $7 (Let' $10 $3))] }
+            | begin function var '(' args ')' returns rexp ';' decls ';' end function { [TypeDecl (getPos $1) (ModifiedType [] None) (Ident $3), VarDecl (getPos $1) (Ident $3) (Lambda' $5 (Let' $10 $8))] }
 
 decls : decl                                     { $1 }
       | decls ';' decl                           { $1 <> $3 }

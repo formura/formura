@@ -57,6 +57,7 @@ tokens :-
   begin                         { withPos TokenBegin }
   end                           { withPos TokenEnd }
   function                      { withPos TokenFunction }
+  returns                       { withPos TokenReturns }
   $digit+                       { readWithPos TokenInt }
   @float              { readWithPos TokenFloat }
   $alpha [$alpha $digit \_ \']* { scanWithPos TokenVar }
@@ -102,6 +103,7 @@ data Token = TokenInt Int
            | TokenBegin
            | TokenEnd
            | TokenFunction
+           | TokenReturns
            | TokenEOS
            -- ^ end of statement
            | TokenEOF
