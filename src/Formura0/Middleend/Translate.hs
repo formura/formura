@@ -374,11 +374,6 @@ trans t (IfR r1 r2 r3) = do
   x3 <- trans t r3
   transIf x1 x2 x3
 trans t (AppR r1 r2) =
--- r1 として許容できるのは
--- - IdentR
--- - LambdaR
--- - TupleR
--- のいずれか
 --
 --
 -- 次のようなものは許容しない (v2.3 でも許容していない)
@@ -405,7 +400,12 @@ trans t (AppR r1 r2) =
       let (!l',!r') = renameArgs p l r
       iTbl <- bindArgs l' r2
       local (\e -> e { identTable = iTbl |+> identTable e }) $ trans t r'
-    _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
+    r -> do
+      res <- trans SomeType r
+      i <- evalToInt r2
+      case res of
+        Node xs -> nthOfTuple xs i
+        _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
 
   where
     nthOfTuple xs i = if i >= 0 && i < length xs then return (xs !! i) else reportError $ "out-of-range tuple index: " ++ show i
