@@ -291,7 +291,7 @@ translate iTblG tTblG (fn,p,vs,b,xs) = do
   iTblL <- makeIdentTable b
   tTblL <- makeTypeTable b
   run (iTblL |+> iTblA |+> iTblG) (tTblL |+> tTblG) p fn $ do
-    res <- trans SomeType xs
+    res <- transV SomeType xs
     storeResult res
     return $ (treeToTExp res,vs)
 
@@ -308,14 +308,25 @@ insertNode i t as = do
   put $! M.insert omid node g
   return $ (omid, t)
 
-updateAnnots :: IdentName -> Tree (OMID,TExp) -> TransM ()
+updateAnnots :: IdentName -> Tree Res -> TransM ()
 updateAnnots n ids = do
   b <- isManifest n
   let as = if b then [SourceName n, ManifestNode] else [SourceName n]
-  mapM_ (addAnnots as) (flatten ids)
+  mapM_ (addAnnots as) ids
   where
-    addAnnots as (i,_) = modify' (\g -> M.adjust (\node -> node { annot = as }) i g)
+    addAnnots as (ResV i _) = modify' (\g -> M.adjust (\node -> node { annot = as }) i g)
+    addAnnots _ (ResF _ _) = return ()
 
+data Res = ResV !OMID !TExp
+         | ResF [LExp] RExp
+  deriving (Eq,Show)
+
+resV :: (OMID,TExp) -> Res
+resV (i,t) = ResV i t
+
+unResV :: Res -> TransM (OMID,TExp)
+unResV (ResV i t) = return (i,t)
+unResV _          = reportError "detect a function"
 
 -- |
 -- trans の仕様
@@ -339,7 +350,7 @@ updateAnnots n ids = do
 -- trans の返り値にある TExp は決定されたノードの型である。
 -- 期待する型には SomeType が含まれるが、決定されたノードの型には SomeType は含まれない。
 -- また、Tree a 型がタプルの構造を保存するため、決定されたノード型は IdentT か GridT である (はず)。
-trans :: TExp -> RExp -> TransM (Tree (OMID, TExp))
+trans :: TExp -> RExp -> TransM (Tree Res)
 trans t (IdentR n) = do
   v <- lookupIdent n
   t' <- lookupType n
@@ -347,32 +358,33 @@ trans t (IdentR n) = do
   res <- transValue t0 n v
   updateAnnots n res
   return res
-trans SomeType (ImmR x) = Leaf <$> insertNode (Imm x) (if denominator x == 1 then IdentT "int" else IdentT "float") [] -- FIXME: とりあえずの実装
+trans SomeType (ImmR x) = Leaf . resV <$> insertNode (Imm x) (if denominator x == 1 then IdentT "int" else IdentT "float") [] -- FIXME: とりあえずの実装
 trans t (ImmR x) =
   if not (isNumType t)
      then reportError $ "invalid type: " ++ show x ++ " is not " ++ show t
-     else Leaf <$> insertNode (Imm x) t []
+     else Leaf . resV <$> insertNode (Imm x) t []
 trans t (TupleR xs) =
   Node <$> case t of
     TupleT ts | length xs == length ts -> zipWithM trans ts xs
     SomeType -> mapM (trans SomeType) xs
     _ -> reportError $ "invalid type: " ++ show (TupleR xs) ++ " is not " ++ show t
-trans t (GridR idx r) = trans t r >>= mapM (transGrid idx)
-trans t (UniopR op r) = trans t r >>= mapM (transUniop op)
+trans t (GridR idx r) = transV t r >>= mapM (fmap resV <$> transGrid idx)
+trans t (UniopR op r) = transV t r >>= mapM (fmap resV <$> transUniop op)
 trans t (BinopR op r1 r2) = do
-  x1 <- trans t r1
-  x2 <- trans t r2
-  transBinop op x1 x2
+  x1 <- transV t r1
+  x2 <- transV t r2
+  fmap resV <$> transBinop op x1 x2
 trans t (LetR b r) = do
   iTbl <- makeIdentTable b
   tTbl <- makeTypeTable b
   local (\e -> e { identTable = iTbl |+> identTable e, typeTable = tTbl |+> typeTable e })  $ trans t r
-trans _ r@(LambdaR _ _) = reportError $ "invalid value: " ++ show r ++ " is a function"
+-- trans _ r@(LambdaR _ _) = reportError $ "invalid value: " ++ show r ++ " is a function"
+trans _ (LambdaR l r) = return $ Leaf $ ResF l r
 trans t (IfR r1 r2 r3) = do
-  x1 <- trans SomeType r1
-  x2 <- trans t r2
-  x3 <- trans t r3
-  transIf x1 x2 x3
+  x1 <- transV SomeType r1
+  x2 <- transV t r2
+  x3 <- transV t r3
+  fmap resV <$> transIf x1 x2 x3
 trans t (AppR r1 r2) =
 --
 --
@@ -384,7 +396,7 @@ trans t (AppR r1 r2) =
     IdentR n -> do
       b <- isExternFunc n
       if b
-        then transExternFunc t n r2
+        then fmap resV <$> transExternFunc t n r2
         else do
           (p1,_,r) <- lookupIdent n
           let newEnv e = e { sourcePos = p1
@@ -392,7 +404,7 @@ trans t (AppR r1 r2) =
                            }
           case r of
             ValueR r'        -> local newEnv $ trans t (AppR r' r2)
-            ValueN (Node xs) -> evalToInt r2 >>= nthOfTuple xs
+            ValueN (Node xs) -> evalToInt r2 >>= (\i -> fmap resV <$> nthOfTuple xs i)
             _                -> reportError $ "invalid type: " ++ show (T.unpack n) ++ " is not appliable"
     TupleR xs   -> evalToInt r2 >>= nthOfTuple xs >>= trans t
     LambdaR l r -> do
@@ -402,21 +414,28 @@ trans t (AppR r1 r2) =
       local (\e -> e { identTable = iTbl |+> identTable e }) $ trans t r'
     r -> do
       res <- trans SomeType r
-      i <- evalToInt r2
       case res of
-        Node xs -> nthOfTuple xs i
+        Node xs -> evalToInt r2 >>= nthOfTuple xs
+        Leaf (ResF l' r') -> trans t (AppR (LambdaR l' r') r2)
         _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
+      -- i <- evalToInt r2
+      -- case res of
+      --   Node xs -> nthOfTuple xs i
+      --   _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
 
   where
     nthOfTuple xs i = if i >= 0 && i < length xs then return (xs !! i) else reportError $ "out-of-range tuple index: " ++ show i
 
-transValue :: TExp -> IdentName -> (AlexPosn,[IdentName],Value) -> TransM (Tree (OMID,TExp))
+transV :: TExp -> RExp -> TransM (Tree (OMID,TExp))
+transV t r = mapM unResV =<< trans t r
+
+transValue :: TExp -> IdentName -> (AlexPosn,[IdentName],Value) -> TransM (Tree Res)
 transValue t0 name (p,idx,v) =
   case v of
     ValueR r   -> local newEnv $ trans t0 r
-    ValueN xs  -> return xs
-    ValueI i   -> Leaf <$> insertNode (LoadIndex i) (IdentT "int") []
-    ValueG i t -> Leaf <$> insertNode (LoadGlobal (vec [0,0,0]) i) t []
+    ValueN xs  -> return $ fmap resV xs
+    ValueI i   -> Leaf . resV <$> insertNode (LoadIndex i) (IdentT "int") []
+    ValueG i t -> Leaf . resV <$> insertNode (LoadGlobal (vec [0,0,0]) i) t []
 
   where
     newEnv e = let iTbl = HM.fromList [(n,(p,[],ValueI x)) | (n,x) <- zip idx [0..]]
@@ -465,7 +484,7 @@ transIf x1 x2 x3 = do
 -- そのふるまいを継承する
 transExternFunc :: TExp -> IdentName -> RExp -> TransM (Tree (OMID,TExp))
 transExternFunc t0 fn r = do
-  res <- trans t0 r
+  res <- transV t0 r
   mapM (\(i,t) -> insertNode (Call1 fn [i]) t []) res
 
 lookupIdent :: IdentName -> TransM (AlexPosn, [IdentName], Value)
@@ -548,7 +567,7 @@ bindArgs ls r@(TupleR rs) = do
       p <- reader sourcePos
       makeIdentTable [VarDecl p (TupleL ls) r]
 bindArgs ls r = do
-  res <- trans SomeType r
+  res <- transV SomeType r
   p <- reader sourcePos
   makeIdentTable' p (TupleL ls) res
 
