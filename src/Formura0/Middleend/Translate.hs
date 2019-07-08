@@ -37,11 +37,11 @@ import Formura0.Vec
 -- Formura0.Middleend.Translate.Bridge
 -- で旧実装に変換して、さらに後ろの処理へ流す
 
-data Value = ValueR RExp
+data Value = ValueR !RExp
            -- ^ グローバルな変数定義やローカルな変数定義の識別子の値
            | ValueI !Int
            -- ^ グリッド型の識別子の値
-           | ValueN (Tree (OMID,TExp))
+           | ValueN !(Tree (OMID,TExp))
            -- ^ 関数の仮引数の識別子の値
            | ValueG !GVID !TExp
            -- ^ グローバル変数の実体
@@ -55,7 +55,7 @@ type TypeTable = HM.HashMap IdentName ([TypeModifier],TExp)
 -- |
 -- new にも old にも同じキーが存在する場合、 old のほうが消え、 new のほうが残る
 (|+>) :: (Eq k, Hashable k) => HM.HashMap k v -> HM.HashMap k v -> HM.HashMap k v
-new |+> old = new <> old
+new |+> old = let !res = new <> old in res
 
 data Tree a = Leaf !a
             | Node [Tree a]
@@ -73,14 +73,14 @@ zipWithTreeM f (Node xs) (Node ys) | length xs == length ys = Node <$> zipWithM 
                                    | otherwise = throwError "tree mismatch"
 
 treeToTExp :: Tree (OMID,TExp) -> TExp
-treeToTExp (Leaf (_,t)) = t
-treeToTExp (Node xs)    = TupleT $ map treeToTExp xs
+treeToTExp (Leaf (_,!t)) = t
+treeToTExp (Node xs)     = TupleT $ map treeToTExp xs
 
 data Env = Env
   { identTable :: !IdentTable
   , typeTable  :: !TypeTable
   , sourcePos  :: !AlexPosn
-  , traceLog   :: ![(AlexPosn,IdentName)]
+  , traceLog   :: [(AlexPosn,IdentName)]
   } deriving (Show)
 
 type TransError = String
@@ -142,8 +142,8 @@ genOMProgram prog cfg = do
   iTbl1 <- makeIdentTable prog
   tTbl <- makeTypeTable prog
   let iTbl = iTbl0 <> iTbl1
-  (ts,ig) <- buildGraph iTbl tTbl (TupleT []) (\_ _ ((t,_),g) -> return (t,g)) "init"
-  (vs,sg) <- buildGraph iTbl tTbl ts validateRes "step"
+  (!ts,!ig) <- buildGraph iTbl tTbl (TupleT []) (\_ _ ((!t,_),!g) -> return (t,g)) "init"
+  (!vs,!sg) <- buildGraph iTbl tTbl ts validateRes "step"
   fsg <- fmap snd <$> buildGraph' iTbl tTbl ts validateRes "first_step"
   flg <- fmap snd <$> buildGraph' iTbl tTbl ts validateRes "filter"
 
@@ -202,18 +202,18 @@ makeImplicitBindings as cfg = HM.fromList $ spacialIntervals <> totalGrids
     totalGrids = zipWith (\a i -> ("total_grid_" <> a, imm i)) as gs
 
 makeIdentTable :: MonadError TransError m => Program -> m IdentTable
-makeIdentTable prog = return $ HM.fromList [ (n,(p,idx,ValueR e)) | VarDecl p l r <- prog, (n,!idx,e) <- unwrap l r]
+makeIdentTable prog = return $ HM.fromList [ (n,(p,idx,ValueR e)) | VarDecl p l r <- prog, (!n,!idx,!e) <- unwrap l r]
   where
-    unwrap (TupleL xs) r = concat [unwrap x (AppR r (ImmR i)) | (x,i) <- zip xs [0..]]
+    unwrap (TupleL xs) r = concat [unwrap x (AppR r (ImmR i)) | (!x,!i) <- zip xs [0..]]
     unwrap (IdentL n) r  = [(n,[],r)]
-    unwrap (GridL (Vec (ZipList idx)) l) r = [(n,idx++idx',r') | (n,idx',r') <- unwrap l r]
+    unwrap (GridL (Vec (ZipList idx)) l) r = [(n,idx++idx',r') | (!n,!idx',!r') <- unwrap l r]
 
 makeTypeTable :: MonadError TransError m => Program -> m TypeTable
-makeTypeTable prog = return $ HM.fromList [ (n,(ms,t')) | (TypeDecl _ (ModifiedType ms t) l) <- prog, (n,t') <- unwrap l t]
+makeTypeTable prog = return $ HM.fromList [ (n,(ms,t')) | (TypeDecl _ (ModifiedType ms t) l) <- prog, (!n,!t') <- unwrap l t]
   where
     unwrap (IdentL n) t            = [(n,t)]
     unwrap (GridL _ l) t           = unwrap l t
-    unwrap (TupleL xs) (TupleT ts) = concat [unwrap x t | (x,t) <- zip xs ts]
+    unwrap (TupleL xs) (TupleT ts) = concat [unwrap x t | (!x,!t) <- zip xs ts]
     unwrap (TupleL xs) SomeType    = concat [unwrap x SomeType | x <- xs]
     unwrap _ _                     = error "error" -- FIX ME
 
@@ -260,7 +260,7 @@ buildGraph' :: IdentTable -> TypeTable -> TExp
 buildGraph' iTbl tTbl ts postTrans name = sequence $ (postTrans name ts <=< translate iTbl tTbl <=< validateValue name ts) <$> HM.lookup name iTbl
 
 validateValue :: IdentName -> TExp -> (AlexPosn,[IdentName],Value) -> Either String (IdentName,AlexPosn,GlobalVariables,Program,RExp)
-validateValue n t0 (p,_,ValueR (LambdaR args (LetR b xs))) = do
+validateValue n t0 (!p,_,ValueR (LambdaR args (LetR b xs))) = do
   vs <- match t0 (TupleL args)
   return (n,p,vs,b,xs)
 
@@ -278,7 +278,7 @@ validateValue n _ _ = Left $ "Error: " ++ T.unpack n ++ "is not a function which
 -- |
 -- validateRes は、グローバル関数の返り値の型が init と一致するか検証する
 validateRes :: IdentName -> TExp -> ((TExp,GlobalVariables),OMGraph) -> Either String (GlobalVariables,OMGraph)
-validateRes n t0 ((t1,vs),g) = if t0 == t1 then return (vs,g) else Left $ "Error: the return type of " ++ T.unpack n ++ " (" ++ show t1 ++ ")" ++ " must match the return type of init (" ++ show t0 ++ ")"
+validateRes n t0 ((!t1,!vs),!g) = if t0 == t1 then return (vs,g) else Left $ "Error: the return type of " ++ T.unpack n ++ " (" ++ show t1 ++ ")" ++ " must match the return type of init (" ++ show t0 ++ ")"
 
 -- |
 -- translate の仕様
@@ -286,7 +286,7 @@ validateRes n t0 ((t1,vs),g) = if t0 == t1 then return (vs,g) else Left $ "Error
 -- ターゲットの関数のローカルな IdentTable と TypeTable を構築して、
 -- trans 関数と storeResult 関数でグラフを構築する
 translate :: IdentTable -> TypeTable -> (IdentName,AlexPosn,GlobalVariables,Program,RExp) -> Either String ((TExp,GlobalVariables),OMGraph)
-translate iTblG tTblG (fn,p,vs,b,xs) = do
+translate iTblG tTblG (!fn,!p,!vs,!b,!xs) = do
   let iTblA = HM.fromList [(n,(p,[],ValueG i t)) | ((n,t),i) <- zip vs [0..]]
   iTblL <- makeIdentTable b
   tTblL <- makeTypeTable b
@@ -322,7 +322,7 @@ data Res = ResV !OMID !TExp
   deriving (Eq,Show)
 
 resV :: (OMID,TExp) -> Res
-resV (i,t) = ResV i t
+resV (!i,!t) = ResV i t
 
 unResV :: Res -> TransM (OMID,TExp)
 unResV (ResV i t) = return (i,t)
@@ -398,7 +398,7 @@ trans t (AppR r1 r2) =
       if b
         then fmap resV <$> transExternFunc t n r2
         else do
-          (p1,_,r) <- lookupIdent n
+          (!p1,_,!r) <- lookupIdent n
           let newEnv e = e { sourcePos = p1
                            , traceLog = (p1,n):traceLog e
                            }
@@ -430,7 +430,7 @@ transV :: TExp -> RExp -> TransM (Tree (OMID,TExp))
 transV t r = mapM unResV =<< trans t r
 
 transValue :: TExp -> IdentName -> (AlexPosn,[IdentName],Value) -> TransM (Tree Res)
-transValue t0 name (p,idx,v) =
+transValue t0 name (!p,!idx,!v) =
   case v of
     ValueR r   -> local newEnv $ trans t0 r
     ValueN xs  -> return $ fmap resV xs
@@ -438,7 +438,7 @@ transValue t0 name (p,idx,v) =
     ValueG i t -> Leaf . resV <$> insertNode (LoadGlobal (vec [0,0,0]) i) t []
 
   where
-    newEnv e = let iTbl = HM.fromList [(n,(p,[],ValueI x)) | (n,x) <- zip idx [0..]]
+    newEnv e = let !iTbl = HM.fromList [(n,(p,[],ValueI x)) | (!n,!x) <- zip idx [0..]]
                 in e { identTable = iTbl |+> identTable e
                      , sourcePos = p
                      , traceLog = (p,name):traceLog e
@@ -459,11 +459,11 @@ transGrid npk res@(i,t) =
     _ -> reportError "bug in transGrid"
 
 transUniop :: Op1 -> (OMID,TExp) -> TransM (OMID,TExp)
-transUniop op (i,t) | isNumType t = insertNode (Uniop op i) t []
-                    | otherwise = reportError $ "invalid type: " ++ show t ++ " is not numeric type"
+transUniop op (!i,!t) | isNumType t = insertNode (Uniop op i) t []
+                      | otherwise = reportError $ "invalid type: " ++ show t ++ " is not numeric type"
 
 transBinop :: Op2 -> Tree (OMID,TExp) -> Tree (OMID,TExp) -> TransM (Tree (OMID,TExp))
-transBinop op x1 x2 = zipWithTreeM (\(i1,t1) (i2,t2) -> matchType t1 t2 >>= inferType op >>= (\t3 -> insertNode (Binop op i1 i2) t3 [])) x1 x2
+transBinop op x1 x2 = zipWithTreeM (\(!i1,!t1) (!i2,!t2) -> matchType t1 t2 >>= inferType op >>= (\t3 -> insertNode (Binop op i1 i2) t3 [])) x1 x2
 
 -- if の仕様
 --
@@ -472,8 +472,8 @@ transBinop op x1 x2 = zipWithTreeM (\(i1,t1) (i2,t2) -> matchType t1 t2 >>= infe
 -- if (x1,x2) then (a1,a2) else (b1,b2) #=> (if x1 then a1 else b1, if x2 then a2 else b2)
 transIf :: Tree (OMID,TExp) -> Tree (OMID,TExp) -> Tree (OMID,TExp) -> TransM (Tree (OMID,TExp))
 transIf x1 x2 x3 = do
-  res <- zipWithTreeM (\(i2,t2) (i3,t3) -> if t2 == t3 then return ((i2,i3),t2) else reportError $ "type mismatch: " ++ show t2 ++ " /= " ++ show t3 ) x2 x3
-  zipWithTreeM (\(i1,t1) ((i2,i3),t2) -> if isBoolishType t1 then insertNode (If i1 i2 i3) t2 [] else reportError $ "type mismatch: " ++ show t1 ++ " is not boolish type") x1 res
+  res <- zipWithTreeM (\(!i2,!t2) (!i3,!t3) -> if t2 == t3 then return ((i2,i3),t2) else reportError $ "type mismatch: " ++ show t2 ++ " /= " ++ show t3 ) x2 x3
+  zipWithTreeM (\(!i1,!t1) ((!i2,!i3),!t2) -> if isBoolishType t1 then insertNode (If i1 i2 i3) t2 [] else reportError $ "type mismatch: " ++ show t1 ++ " is not boolish type") x1 res
 
 -- |
 -- transExternFunc の仕様
@@ -485,7 +485,7 @@ transIf x1 x2 x3 = do
 transExternFunc :: TExp -> IdentName -> RExp -> TransM (Tree (OMID,TExp))
 transExternFunc t0 fn r = do
   res <- transV t0 r
-  mapM (\(i,t) -> insertNode (Call1 fn [i]) t []) res
+  mapM (\(!i,!t) -> insertNode (Call1 fn [i]) t []) res
 
 lookupIdent :: IdentName -> TransM (AlexPosn, [IdentName], Value)
 lookupIdent n = do
@@ -498,13 +498,13 @@ lookupType :: IdentName -> TransM TExp
 lookupType n = do
   tbl <- reader typeTable
   return $ case HM.lookup n tbl of
-    Nothing    -> SomeType
-    Just (_,t) -> t
+    Nothing     -> SomeType
+    Just (_,!t) -> t
 
 evalToInt :: RExp -> TransM Int
 evalToInt (ImmR n) = if denominator n == 1 then return (fromInteger $ numerator n) else reportError "non-integer indexing in tuple access"
 evalToInt (IdentR n) = do
-  (p,_,v) <- lookupIdent n
+  (!p,_,!v) <- lookupIdent n
   case v of
     ValueR r -> local (\e -> e { sourcePos = p }) $ evalToInt r
     _        -> reportError $ show (T.unpack n) ++ " is not integer"
@@ -580,7 +580,7 @@ bindArgs ls r = do
 
 storeResult :: Tree (OMID,TExp) -> TransM ()
 storeResult res =
-  zipWithM_ (\(i,_) v -> insertNode (Store v i) (IdentT "void") []) (flatten res) [0..]
+  zipWithM_ (\(!i,_) v -> insertNode (Store v i) (IdentT "void") []) (flatten res) [0..]
 
 isNumType :: TExp -> Bool
 isNumType (IdentT t)  = t `notElem` ["bool", "string"]
