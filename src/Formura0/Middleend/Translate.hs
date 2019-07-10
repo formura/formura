@@ -3,8 +3,11 @@
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE DeriveTraversable          #-}
 {-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
 module Formura0.Middleend.Translate where
 
 import           Control.Applicative
@@ -21,6 +24,8 @@ import           Data.List (intercalate)
 import qualified Data.Map as M
 import           Data.Ratio
 import qualified Data.Text as T
+
+import Debug.Trace
 
 import Formura.NumericalConfig
 import Formura0.Annotation
@@ -55,7 +60,7 @@ type TypeTable = HM.HashMap IdentName ([TypeModifier],TExp)
 -- |
 -- new にも old にも同じキーが存在する場合、 old のほうが消え、 new のほうが残る
 (|+>) :: (Eq k, Hashable k) => HM.HashMap k v -> HM.HashMap k v -> HM.HashMap k v
-new |+> old = let !res = new <> old in res
+new |+> old = let !res = HM.union new old in res
 
 data Tree a = Leaf !a
             | Node [Tree a]
@@ -291,7 +296,7 @@ translate iTblG tTblG (!fn,!p,!vs,!b,!xs) = do
   iTblL <- makeIdentTable b
   tTblL <- makeTypeTable b
   run (iTblL |+> iTblA |+> iTblG) (tTblL |+> tTblG) p fn $ do
-    res <- transV SomeType xs
+    !res <- transV SomeType xs
     storeResult res
     return $ (treeToTExp res,vs)
 
@@ -299,8 +304,8 @@ translate iTblG tTblG (!fn,!p,!vs,!b,!xs) = do
 -- TransM の状態である OMGraph に変更を行うのは insertNode 関数と updateAnnots 関数のみである
 insertNode :: MonadState OMGraph m => OMInst -> TExp -> [Annot] -> m (OMID, TExp)
 insertNode i t as = do
-  g <- get
-  let omid = M.size g
+  !g <- get
+  let !omid = M.size g
       node = OMNode { inst = i
                     , theType = t
                     , annot = as
@@ -315,10 +320,10 @@ updateAnnots n ids = do
   mapM_ (addAnnots as) ids
   where
     addAnnots as (ResV i _) = modify' (\g -> M.adjust (\node -> node { annot = as }) i g)
-    addAnnots _ (ResF _ _) = return ()
+    addAnnots _ (ResF _ _ _) = return ()
 
 data Res = ResV !OMID !TExp
-         | ResF [LExp] RExp
+         | ResF !AlexPosn ![LExp] !RExp
   deriving (Eq,Show)
 
 resV :: (OMID,TExp) -> Res
@@ -352,6 +357,10 @@ unResV _          = reportError "detect a function"
 -- また、Tree a 型がタプルの構造を保存するため、決定されたノード型は IdentT か GridT である (はず)。
 trans :: TExp -> RExp -> TransM (Tree Res)
 trans t (IdentR n) = do
+  -- p <- reader sourcePos
+  -- env <- ask
+  -- traceM $ formatPos p ++ " " ++ T.unpack n
+  -- traceM $ "  env: " ++ show env
   v <- lookupIdent n
   t' <- lookupType n
   t0 <- expectType t t'
@@ -379,7 +388,9 @@ trans t (LetR b r) = do
   tTbl <- makeTypeTable b
   local (\e -> e { identTable = iTbl |+> identTable e, typeTable = tTbl |+> typeTable e })  $ trans t r
 -- trans _ r@(LambdaR _ _) = reportError $ "invalid value: " ++ show r ++ " is a function"
-trans _ (LambdaR l r) = return $ Leaf $ ResF l r
+trans _ (LambdaR l r) = do
+  p <- reader sourcePos
+  return $ Leaf $ ResF p l r
 trans t (IfR r1 r2 r3) = do
   x1 <- transV SomeType r1
   x2 <- transV t r2
@@ -399,11 +410,14 @@ trans t (AppR r1 r2) =
         then fmap resV <$> transExternFunc t n r2
         else do
           (!p1,_,!r) <- lookupIdent n
-          let newEnv e = e { sourcePos = p1
-                           , traceLog = (p1,n):traceLog e
-                           }
+          -- let newEnv !e = e { sourcePos = p1
+          --                   , traceLog = (p1,n):traceLog e
+          --                   }
           case r of
-            ValueR r'        -> local newEnv $ trans t (AppR r' r2)
+            ValueR r'        -> let newEnv !e = e { sourcePos = p1
+                                                  , traceLog = (p1,n):traceLog e
+                                                  }
+                                in local newEnv $ trans t (AppR r' r2)
             ValueN (Node xs) -> evalToInt r2 >>= (\i -> fmap resV <$> nthOfTuple xs i)
             _                -> reportError $ "invalid type: " ++ show (T.unpack n) ++ " is not appliable"
     TupleR xs   -> evalToInt r2 >>= nthOfTuple xs >>= trans t
@@ -416,7 +430,7 @@ trans t (AppR r1 r2) =
       res <- trans SomeType r
       case res of
         Node xs -> evalToInt r2 >>= nthOfTuple xs
-        Leaf (ResF l' r') -> trans t (AppR (LambdaR l' r') r2)
+        Leaf (ResF p' l' r') -> local (\e -> e { sourcePos = p' }) $ trans t (AppR (LambdaR l' r') r2)
         _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
       -- i <- evalToInt r2
       -- case res of
@@ -432,17 +446,22 @@ transV t r = mapM unResV =<< trans t r
 transValue :: TExp -> IdentName -> (AlexPosn,[IdentName],Value) -> TransM (Tree Res)
 transValue t0 name (!p,!idx,!v) =
   case v of
-    ValueR r   -> local newEnv $ trans t0 r
+    ValueR r   -> let newEnv !e = let !iTbl = HM.fromList [(n,(p,[],ValueI x)) | (!n,!x) <- zip idx [0..]]
+                                  in e { identTable = iTbl |+> identTable e
+                                       , sourcePos = p
+                                       , traceLog = (p,name):traceLog e
+                                       }
+                  in local newEnv $ trans t0 r
     ValueN xs  -> return $ fmap resV xs
     ValueI i   -> Leaf . resV <$> insertNode (LoadIndex i) (IdentT "int") []
     ValueG i t -> Leaf . resV <$> insertNode (LoadGlobal (vec [0,0,0]) i) t []
 
-  where
-    newEnv e = let !iTbl = HM.fromList [(n,(p,[],ValueI x)) | (!n,!x) <- zip idx [0..]]
-                in e { identTable = iTbl |+> identTable e
-                     , sourcePos = p
-                     , traceLog = (p,name):traceLog e
-                     }
+  -- where
+  --   newEnv !e = let !iTbl = HM.fromList [(n,(p,[],ValueI x)) | (!n,!x) <- zip idx [0..]]
+  --               in e { identTable = iTbl |+> identTable e
+  --                    , sourcePos = p
+  --                    , traceLog = (p,name):traceLog e
+  --                    }
 
 transGrid :: Vec NPlusK -> (OMID,TExp) -> TransM (OMID,TExp)
 transGrid npk res@(i,t) =
@@ -492,7 +511,10 @@ lookupIdent n = do
   tbl <- reader identTable
   case HM.lookup n tbl of
     Nothing -> reportError $ "Not found the identifier " ++ show (T.unpack n)
-    Just x  -> return x
+    Just x  -> do
+      p <- reader sourcePos
+      traceM $ formatPos p ++ " " ++ T.unpack n ++ " = " ++ show x
+      return x
 
 lookupType :: IdentName -> TransM TExp
 lookupType n = do
