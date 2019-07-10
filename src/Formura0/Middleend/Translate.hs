@@ -491,7 +491,7 @@ transBinop op x1 x2 = zipWithTreeM (\(!i1,!t1) (!i2,!t2) -> matchType t1 t2 >>= 
 -- if (x1,x2) then (a1,a2) else (b1,b2) #=> (if x1 then a1 else b1, if x2 then a2 else b2)
 transIf :: Tree (OMID,TExp) -> Tree (OMID,TExp) -> Tree (OMID,TExp) -> TransM (Tree (OMID,TExp))
 transIf x1 x2 x3 = do
-  res <- zipWithTreeM (\(!i2,!t2) (!i3,!t3) -> if t2 == t3 then return ((i2,i3),t2) else reportError $ "type mismatch: " ++ show t2 ++ " /= " ++ show t3 ) x2 x3
+  res <- zipWithTreeM (\(!i2,!t2) (!i3,!t3) -> matchType t2 t3 >>= (\t -> return ((i2,i3),t))) x2 x3
   zipWithTreeM (\(!i1,!t1) ((!i2,!i3),!t2) -> if isBoolishType t1 then insertNode (If i1 i2 i3) t2 [] else reportError $ "type mismatch: " ++ show t1 ++ " is not boolish type") x1 res
 
 -- |
