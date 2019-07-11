@@ -85,8 +85,13 @@ data Env = Env
   { identTable :: !IdentTable
   , typeTable  :: !TypeTable
   , sourcePos  :: !AlexPosn
-  , traceLog   :: [(AlexPosn,IdentName)]
+  , traceLog   :: ![(AlexPosn,IdentName)]
   } deriving (Show)
+
+newEnv :: IdentName -> AlexPosn -> Env -> Env
+newEnv n p e = e { sourcePos = p
+                 , traceLog = (p,n):traceLog e
+                 }
 
 type TransError = String
 
@@ -118,6 +123,8 @@ reportError msg = do
             , ""
             , "  graph:"
             , "    " ++ show g
+            , ""
+            , "('・_・`)"
             ]
   where
     showTraceLog xs = intercalate " |> " [T.unpack n ++ " (" ++ formatPos p ++ ")" | (p,n) <- reverse xs]
@@ -331,7 +338,7 @@ resV (!i,!t) = ResV i t
 
 unResV :: Res -> TransM (OMID,TExp)
 unResV (ResV i t) = return (i,t)
-unResV _          = reportError "detect a function"
+unResV _          = reportError "expect a value but detect a function"
 
 -- |
 -- trans の仕様
@@ -357,10 +364,6 @@ unResV _          = reportError "detect a function"
 -- また、Tree a 型がタプルの構造を保存するため、決定されたノード型は IdentT か GridT である (はず)。
 trans :: TExp -> RExp -> TransM (Tree Res)
 trans t (IdentR n) = do
-  -- p <- reader sourcePos
-  -- env <- ask
-  -- traceM $ formatPos p ++ " " ++ T.unpack n
-  -- traceM $ "  env: " ++ show env
   v <- lookupIdent n
   t' <- lookupType n
   t0 <- expectType t t'
@@ -387,7 +390,6 @@ trans t (LetR b r) = do
   iTbl <- makeIdentTable b
   tTbl <- makeTypeTable b
   local (\e -> e { identTable = iTbl |+> identTable e, typeTable = tTbl |+> typeTable e })  $ trans t r
--- trans _ r@(LambdaR _ _) = reportError $ "invalid value: " ++ show r ++ " is a function"
 trans _ (LambdaR l r) = do
   p <- reader sourcePos
   return $ Leaf $ ResF p l r
@@ -410,14 +412,8 @@ trans t (AppR r1 r2) =
         then fmap resV <$> transExternFunc t n r2
         else do
           (!p1,_,!r) <- lookupIdent n
-          -- let newEnv !e = e { sourcePos = p1
-          --                   , traceLog = (p1,n):traceLog e
-          --                   }
           case r of
-            ValueR r'        -> let newEnv !e = e { sourcePos = p1
-                                                  , traceLog = (p1,n):traceLog e
-                                                  }
-                                in local newEnv $ trans t (AppR r' r2)
+            ValueR r'        -> local (newEnv n p1) $ trans t (AppR r' r2)
             ValueN (Node xs) -> evalToInt r2 >>= (\i -> fmap resV <$> nthOfTuple xs i)
             _                -> reportError $ "invalid type: " ++ show (T.unpack n) ++ " is not appliable"
     TupleR xs   -> evalToInt r2 >>= nthOfTuple xs >>= trans t
@@ -432,10 +428,6 @@ trans t (AppR r1 r2) =
         Node xs -> evalToInt r2 >>= nthOfTuple xs
         Leaf (ResF p' l' r') -> local (\e -> e { sourcePos = p' }) $ trans t (AppR (LambdaR l' r') r2)
         _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
-      -- i <- evalToInt r2
-      -- case res of
-      --   Node xs -> nthOfTuple xs i
-      --   _ -> reportError $ "invalid type: " ++ show r1 ++ " is not appliable"
 
   where
     nthOfTuple xs i = if i >= 0 && i < length xs then return (xs !! i) else reportError $ "out-of-range tuple index: " ++ show i
@@ -446,22 +438,15 @@ transV t r = mapM unResV =<< trans t r
 transValue :: TExp -> IdentName -> (AlexPosn,[IdentName],Value) -> TransM (Tree Res)
 transValue t0 name (!p,!idx,!v) =
   case v of
-    ValueR r   -> let newEnv !e = let !iTbl = HM.fromList [(n,(p,[],ValueI x)) | (!n,!x) <- zip idx [0..]]
-                                  in e { identTable = iTbl |+> identTable e
-                                       , sourcePos = p
-                                       , traceLog = (p,name):traceLog e
-                                       }
-                  in local newEnv $ trans t0 r
+    ValueR r   -> let updateEnv !e = let !iTbl = HM.fromList [(n,(p,[],ValueI x)) | (!n,!x) <- zip idx [0..]]
+                                      in e { identTable = iTbl |+> identTable e
+                                           , sourcePos = p
+                                           , traceLog = (p,name):traceLog e
+                                           }
+                  in local updateEnv $ trans t0 r
     ValueN xs  -> return $ fmap resV xs
     ValueI i   -> Leaf . resV <$> insertNode (LoadIndex i) (IdentT "int") []
     ValueG i t -> Leaf . resV <$> insertNode (LoadGlobal (vec [0,0,0]) i) t []
-
-  -- where
-  --   newEnv !e = let !iTbl = HM.fromList [(n,(p,[],ValueI x)) | (!n,!x) <- zip idx [0..]]
-  --               in e { identTable = iTbl |+> identTable e
-  --                    , sourcePos = p
-  --                    , traceLog = (p,name):traceLog e
-  --                    }
 
 transGrid :: Vec NPlusK -> (OMID,TExp) -> TransM (OMID,TExp)
 transGrid npk res@(i,t) =
@@ -528,7 +513,7 @@ evalToInt (ImmR n) = if denominator n == 1 then return (fromInteger $ numerator 
 evalToInt (IdentR n) = do
   (!p,_,!v) <- lookupIdent n
   case v of
-    ValueR r -> local (\e -> e { sourcePos = p }) $ evalToInt r
+    ValueR r -> local (newEnv n p) $ evalToInt r
     _        -> reportError $ show (T.unpack n) ++ " is not integer"
 evalToInt r = reportError $ show r ++ " is not integer"
 
@@ -578,6 +563,10 @@ renameArgs (AlexPn pos _ _) args body = (map renameL args, renameR body)
 --
 -- あらゆる場合において r2 を先に評価しないのは、関数の受け渡しを許容するためである
 -- (LambdaR に対する trans は常に失敗する)
+--
+-- TODO: ↑ を見直す
+--   - 正格評価か遅延評価で迷走したせいでよくわからないことになっている
+--   - 遅延評価でいくと決めたので、それと整合するようにする
 bindArgs :: [LExp] -> RExp -> TransM IdentTable
 bindArgs [IdentL l] r = do
   p <- reader sourcePos
