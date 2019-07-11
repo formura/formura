@@ -153,7 +153,7 @@ genOMProgram prog cfg = do
 
   iTbl1 <- makeIdentTable prog
   tTbl <- makeTypeTable prog
-  let iTbl = iTbl0 <> iTbl1
+  let iTbl = iTbl0 |+> iTbl1
   (!ts,!ig) <- buildGraph iTbl tTbl (TupleT []) (\_ _ ((!t,_),!g) -> return (t,g)) "init"
   (!vs,!sg) <- buildGraph iTbl tTbl ts validateRes "step"
   fsg <- fmap snd <$> buildGraph' iTbl tTbl ts validateRes "first_step"
@@ -370,7 +370,7 @@ trans t (IdentR n) = do
   res <- transValue t0 n v
   updateAnnots n res
   return res
-trans SomeType (ImmR x) = Leaf . resV <$> insertNode (Imm x) (if denominator x == 1 then IdentT "int" else IdentT "float") [] -- FIXME: とりあえずの実装
+trans SomeType (ImmR x) = Leaf . resV <$> insertNode (Imm x) (IdentT "real") [] -- real はオプションでユーザーが指定できる (生成される C のコードでは、 type double real; のような宣言がある)
 trans t (ImmR x) =
   if not (isNumType t)
      then reportError $ "invalid type: " ++ show x ++ " is not " ++ show t
@@ -420,7 +420,7 @@ trans t (AppR r1 r2) =
     LambdaR l r -> do
       p <- reader sourcePos
       let (!l',!r') = renameArgs p l r
-      iTbl <- bindArgs l' r2
+      iTbl <- bindArgs p l' r2
       local (\e -> e { identTable = iTbl |+> identTable e }) $ trans t r'
     r -> do
       res <- trans SomeType r
@@ -557,37 +557,40 @@ renameArgs (AlexPn pos _ _) args body = (map renameL args, renameR body)
 -- |
 -- bindArgs の仕様
 --
--- l が識別子なら、そのままマッチ可能
--- l と r2 が同じ長さのタプルなら、そのままマッチ可能
--- l がタプルで、 r2 がタプル以外なら、r2 を評価してからマッチを行う
 --
--- あらゆる場合において r2 を先に評価しないのは、関数の受け渡しを許容するためである
--- (LambdaR に対する trans は常に失敗する)
---
--- TODO: ↑ を見直す
---   - 正格評価か遅延評価で迷走したせいでよくわからないことになっている
---   - 遅延評価でいくと決めたので、それと整合するようにする
-bindArgs :: [LExp] -> RExp -> TransM IdentTable
-bindArgs [IdentL l] r = do
-  p <- reader sourcePos
-  return $ HM.fromList [(l,(p,[],ValueR r))]
-bindArgs ls r@(TupleR rs) = do
-  if length ls /= length rs
-    then reportError "tuple length mismatch"
-    else do
-      p <- reader sourcePos
-      makeIdentTable [VarDecl p (TupleL ls) r]
-bindArgs ls r = do
-  res <- transV SomeType r
-  p <- reader sourcePos
-  makeIdentTable' p (TupleL ls) res
+-- メモ: 正格評価 vs 遅延評価
+--   正格評価のダメなところ
+--   - 期待する型を適切に伝播できない (型推論をがんばらないと無理)
+--   - 関数を戻すのが大変 (Res 型の導入によって解決)
+--   非正格評価のダメなところ
+--   - エラーの発生源がわかりにくい (traceLog によって解決)
+--   - 仮引数と実引数の識別子が一致していると循環参照が発生する (renameArgs によって解決)
+--   - 同じものを何度も評価する場合がある
+bindArgs :: AlexPosn -> [LExp] -> RExp -> TransM IdentTable
+bindArgs p [l] r = makeIdentTable [VarDecl p l r]
+bindArgs p ls r  = makeIdentTable [VarDecl p (TupleL ls) r]
 
-  where
-    -- makeIdentTable' の LExp に GridL は絶対にない (Parser の構成から)
-    makeIdentTable' :: AlexPosn -> LExp -> Tree (OMID,TExp) -> TransM IdentTable
-    makeIdentTable' p0 (TupleL ls0) (Node xs) | length ls == length xs = HM.unions <$> zipWithM (makeIdentTable' p0) ls0 xs
-    makeIdentTable' p0 (IdentL l) x = return $ HM.singleton l (p0,[],ValueN x)
-    makeIdentTable' _ _ _ = reportError "tuple length mismatch"
+-- bindArgs :: [LExp] -> RExp -> TransM IdentTable
+-- bindArgs [IdentL l] r = do
+--   p <- reader sourcePos
+--   return $ HM.fromList [(l,(p,[],ValueR r))]
+-- bindArgs ls r@(TupleR rs) = do
+--   if length ls /= length rs
+--     then reportError "tuple length mismatch"
+--     else do
+--       p <- reader sourcePos
+--       makeIdentTable [VarDecl p (TupleL ls) r]
+-- bindArgs ls r = do
+--   res <- transV SomeType r
+--   p <- reader sourcePos
+--   makeIdentTable' p (TupleL ls) res
+
+--   where
+--     -- makeIdentTable' の LExp に GridL は絶対にない (Parser の構成から)
+--     makeIdentTable' :: AlexPosn -> LExp -> Tree (OMID,TExp) -> TransM IdentTable
+--     makeIdentTable' p0 (TupleL ls0) (Node xs) | length ls == length xs = HM.unions <$> zipWithM (makeIdentTable' p0) ls0 xs
+--     makeIdentTable' p0 (IdentL l) x = return $ HM.singleton l (p0,[],ValueN x)
+--     makeIdentTable' _ _ _ = reportError "tuple length mismatch"
 
 storeResult :: Tree (OMID,TExp) -> TransM ()
 storeResult res =
