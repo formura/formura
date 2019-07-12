@@ -18,7 +18,7 @@ import Formura.GlobalEnvironment
 import Formura.NumericalConfig
 import Formura.OrthotopeMachine.Graph
 import Formura.Syntax
-import Formura.Vec
+import Formura.IR
 
 scaffold :: BuildM ()
 scaffold = do
