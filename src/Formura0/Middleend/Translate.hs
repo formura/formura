@@ -297,13 +297,20 @@ validateRes n t0 ((!t1,!vs),!g) = if t0 == t1 then return (vs,g) else Left $ "Er
 --
 -- ターゲットの関数のローカルな IdentTable と TypeTable を構築して、
 -- trans 関数と storeResult 関数でグラフを構築する
+-- translate :: IdentTable -> TypeTable -> (IdentName,AlexPosn,GlobalVariables,Program,RExp) -> Either String ((TExp,GlobalVariables),OMGraph)
+-- translate iTblG tTblG (!fn,!p,!vs,!b,!xs) = do
+--   let iTblA = HM.fromList [(n,(p,[],ValueG i t)) | ((n,t),i) <- zip vs [0..]]
+--   iTblL <- makeIdentTable b
+--   tTblL <- makeTypeTable b
+--   run (iTblL |+> iTblA |+> iTblG) (tTblL |+> tTblG) p fn $ do
+--     !res <- transV SomeType xs
+--     storeResult res
+--     return $ (treeToTExp res,vs)
 translate :: IdentTable -> TypeTable -> (IdentName,AlexPosn,GlobalVariables,Program,RExp) -> Either String ((TExp,GlobalVariables),OMGraph)
 translate iTblG tTblG (!fn,!p,!vs,!b,!xs) = do
   let iTblA = HM.fromList [(n,(p,[],ValueG i t)) | ((n,t),i) <- zip vs [0..]]
-  iTblL <- makeIdentTable b
-  tTblL <- makeTypeTable b
-  run (iTblL |+> iTblA |+> iTblG) (tTblL |+> tTblG) p fn $ do
-    !res <- transV SomeType xs
+  run (iTblA |+> iTblG) tTblG p fn $ do
+    !res <- transV' (LetR b xs)
     storeResult res
     return $ (treeToTExp res,vs)
 
@@ -648,3 +655,51 @@ inferType op t | isArith op = if isNumType t then return t else reportError $ "i
                                _           -> reportError "bug in inferType"
   where
     isArith o = o `elem` [Add,Sub,Mul,Div,Pow]
+
+
+
+---------------
+-- trans' は上から順に評価してグラフを構築する
+--
+-- 型の決定
+-- - 前提
+--   - グローバル変数には型が与えられている
+--   - ユーザーの型注釈は絶対
+-- - 型注釈がないとき
+--   x = 1.0
+--   a = b + c
+--   - 即値は real 型
+--   - 二項演算は大きいほう
+-- - 型注釈があるとき
+--   float :: x = 1.0
+--   double :: a = b + c
+--   - b, c へ期待する型を伝播しない
+--   - b, c を評価して返ってきた型と指定された型が整合すればOKで整合しなければエラー
+--
+--
+--
+--
+trans' :: RExp -> TransM (Tree Res)
+trans' (IdentR n) = undefined
+trans' (ImmR x) = Leaf . resV <$> insertNode (Imm x) (IdentT "real") [] -- real はオプションでユーザーが指定できる (生成される C のコードでは、 type double real; のような宣言がある)
+trans' (TupleR xs) = Node <$> mapM trans' xs
+trans' (GridR idx r) = transV' r >>= mapM (fmap resV <$> transGrid idx)
+trans' (UniopR op r) = transV' r >>= mapM (fmap resV <$> transUniop op)
+trans' (BinopR op r1 r2) = do
+  x1 <- transV' r1
+  x2 <- transV' r2
+  fmap resV <$> transBinop op x1 x2
+trans' (LetR b r) = undefined
+trans' (LambdaR l r) = do
+  p <- reader sourcePos
+  return $ Leaf $ ResF p l r
+trans' (IfR r1 r2 r3) = do
+  x1 <- transV' r1
+  x2 <- transV' r2
+  x3 <- transV' r3
+  fmap resV <$> transIf x1 x2 x3
+trans' (AppR r1 r2) = undefined
+
+transV' :: RExp -> TransM (Tree (OMID,TExp))
+transV' r = mapM unResV =<< trans' r
+
