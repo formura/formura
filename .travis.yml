@@ -1,5 +1,9 @@
-sudo: false
 language: generic
+matrix:
+  include:
+    - os: linux
+      dist: trusty
+    - os: osx
 cache:
   directories:
   - .stack-work
@@ -9,16 +13,41 @@ addons:
     packages:
     - libgmp-dev
 before_install:
-- wget https://github.com/Z3Prover/z3/releases/download/z3-4.6.0/z3-4.6.0-x64-ubuntu-14.04.zip
-- unzip z3-4.6.0-x64-ubuntu-14.04.zip
-- sudo cp z3-4.6.0-x64-ubuntu-14.04/bin/z3 /usr/local/bin
-- sudo chmod +x /usr/local/bin/z3
-- z3 -version
-- mkdir -p ~/.local/bin
+- mkdir -p "$HOME/.local/bin"
 - export PATH=$HOME/.local/bin:$PATH
-- travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards
-  --strip-components=1 -C ~/.local/bin '*/stack'
-- stack --version
+- | # install z3
+  Z3Version=4.8.5
+  if [ "$TRAVIS_OS_NAME" = "osx" ]
+  then
+    Z3DIST=z3-$Z3Version-x64-osx-10.14.2
+  else
+    Z3DIST=z3-$Z3Version-x64-ubuntu-14.04
+  fi
+  wget "https://github.com/Z3Prover/z3/releases/download/Z3-$Z3Version/$Z3DIST.zip"
+  unzip $Z3DIST.zip
+  cp $Z3DIST/bin/z3 $HOME/.local/bin
+  chmod +x $HOME/.local/bin/z3
+  z3 -version
+# - wget https://github.com/Z3Prover/z3/releases/download/z3-4.6.0/z3-4.6.0-x64-ubuntu-14.04.zip
+# - unzip z3-4.6.0-x64-ubuntu-14.04.zip
+# - sudo cp z3-4.6.0-x64-ubuntu-14.04/bin/z3 /usr/local/bin
+# - sudo chmod +x /usr/local/bin/z3
+# - z3 -version
+- | #install stack
+  StackVersion=1.9.3
+  if [ "$TRAVIS_OS_NAME" = "osx" ]
+  then
+    StackDIST=stack-$StackVersion-osx-x86_64
+  else
+    StackDIST=stack-$StackVersion-linux-x86_64
+  fi
+  wget "https://github.com/commercialhaskell/stack/releases/download/v$StackVersion/$StackDIST.tar.gz"
+  tar -xzf $StackDIST.tar.gz
+  cp $StackDIST/stack $HOME/.local/bin
+  stack --version
+# - travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards
+#   --strip-components=1 -C ~/.local/bin '*/stack'
+# - stack --version
 install:
 - stack --no-terminal --install-ghc test --only-dependencies
 script:
