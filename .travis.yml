@@ -53,6 +53,24 @@ install:
 script:
 - stack --no-terminal build
 - stack --no-terminal test
+- stack --no-terminal --local-bin-path bin install
+before_deploy:
+- | #rename binary
+  if [ "$TRAVIS_OS_NAME" = "osx" ]
+  then
+    export OS_NAME=mac
+  else
+    export OS_NAME=linux
+  fi
+  cp bin/formura bin/formura_$OS_NAME
+deploy:
+  provider: releases
+  api_key: $RELEASE_KEY
+  file: bin/formura_$OS_NAME
+  skip_cleanup: true
+  on:
+    tags: true
+    branch: master
 notifications:
   slack:
     secure: QBO3UZ+AItODG0SNyxmSXVIMwedVMqjkHSkQfgWlDDnfgsFqW//WCFdrHiF8ZpLWvLWXlXe5QJkaCoECcfFviDlM5XBWuKrP5Bt3IJox03CAPQ+s3NQpEDOhVXRr0B/OHYZDhcTYAACDQ0vIwzr1nV8dNaQNnvH16BwZ3ZfUcOTIb0ZaK+P4NEG/AjO625bp+RQaWOA8X4u1a6i15hWjslvhyMFsQZXgW91Kz7PE4ymFk1bINVFRRC0mSkdLNNFJlXs7BfiNqV/hGNoUixD85Xgr+qHTKkbnfEa9iPsz3gvn7L8mV4kJzKvxUMtFzOQclc4uR2BiWxOYZiYyCIwo38fZhy5YfWpfgsPDXJ+XawVRjAxwSjC/fVoesMCpuoVz7W/kd66HGDfoUmtizcWmOzSTu32N+96NAifZPJwY7lQYjk8P55AxIi6wM7O1cePbU+l/7LwMUJxbIddhpTr5EglCXZWekfodOwxW9EL4M+/f0qdP5030sBPUSqpWL4f3K49TBHWwZxU3cT/mivTprvEBr9FGdeLlABJB32yp6jU3tBs9fAK53KqIKXboa0i2eg3l8aZAas/22JRaRSgZ25dnKpcZzqy/GdRVbZlTWtGgfHvog4gAwlza26uhzdoWTaPidpjK40nlrSXkAEMLyLxblWPOnxzZRFc6SNC4hgA=
