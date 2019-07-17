@@ -9,6 +9,7 @@ A module for manifestation of the Orthotope Machine: that is, an operation that 
 -}
 
 {-# LANGUAGE ConstraintKinds      #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds            #-}
 {-# LANGUAGE DeriveFoldable       #-}
 {-# LANGUAGE DeriveFunctor        #-}
@@ -46,7 +47,7 @@ data TranState = TranState
   { _tranSyntacticState :: CompilerSyntacticState
   , _isManifestNode :: OMNodeID -> Bool
   , _theGraph :: OMGraph
-  , _theMMInstruction :: MMInstruction
+  , _theMMInstruction :: !MMInstruction
   , _nodeIDMap :: M.Map (Vec Int, OMNodeID) MMNodeID
   }
 
@@ -113,7 +114,7 @@ insertMM c i inst = do
 
 -- | generate code that returns the RHS of current (cursor,nid)
 rhsCodeAt :: WithNBUSpine => Vec Int -> OMNodeID -> TranM MMNodeID
-rhsCodeAt cursor nid = do
+rhsCodeAt !cursor nid = do
   isM <- use isManifestNode
   if isM nid
     then insertMM cursor nid (LoadCursor cursor nid)
@@ -121,7 +122,7 @@ rhsCodeAt cursor nid = do
 
 -- | generate code that calculates the RHS of current (cursor,nid)
 rhsDelayedCodeAt :: WithNBUSpine => Vec Int -> OMNodeID -> TranM MMNodeID
-rhsDelayedCodeAt cursor omNodeID = do
+rhsDelayedCodeAt !cursor omNodeID = do
   let ins = insertMM cursor omNodeID
   (Node inst0 _ _) <- lookupNode omNodeID
   case inst0 of

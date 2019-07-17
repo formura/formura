@@ -1,4 +1,8 @@
 # Changelog for formura
+## version 2.3.1
+
+- Improve compilation performance
+
 ## version 2.3
 
 - Run also without MPI
