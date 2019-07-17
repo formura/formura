@@ -28,11 +28,6 @@ before_install:
   cp $Z3DIST/bin/z3 $HOME/.local/bin
   chmod +x $HOME/.local/bin/z3
   z3 -version
-# - wget https://github.com/Z3Prover/z3/releases/download/z3-4.6.0/z3-4.6.0-x64-ubuntu-14.04.zip
-# - unzip z3-4.6.0-x64-ubuntu-14.04.zip
-# - sudo cp z3-4.6.0-x64-ubuntu-14.04/bin/z3 /usr/local/bin
-# - sudo chmod +x /usr/local/bin/z3
-# - z3 -version
 - | #install stack
   StackVersion=1.9.3
   if [ "$TRAVIS_OS_NAME" = "osx" ]
@@ -45,9 +40,6 @@ before_install:
   tar -xzf $StackDIST.tar.gz
   cp $StackDIST/stack $HOME/.local/bin
   stack --version
-# - travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards
-#   --strip-components=1 -C ~/.local/bin '*/stack'
-# - stack --version
 install:
 - stack --no-terminal --install-ghc test --only-dependencies
 script:
