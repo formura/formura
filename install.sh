@@ -24,9 +24,9 @@ url="https://github.com/formura/formura/releases/download/${formura_version}/${f
 
 mkdir -p ${formura_bin_dir}
 cd ${formura_bin_dir}
-wget $url
+curl -sSfL $url -o ${formura}
 chmod +x $formura
-ln -s $formura formura
+ln -f -s $formura formura
 
 cat <<MSG
 Installed
