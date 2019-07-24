@@ -14,7 +14,25 @@ Note: The originary repo is <https://github.com/nushio3/formura>.
 
 # Quick Start
 
-OS: Ubuntu 18.04
+OS: Ubuntu 18.04, CentOS 7, Mac, WSL
+
+```
+curl -sSfL https://raw.githubusercontent.com/formura/formura/master/install.sh | sh
+```
+
+Add `${HOME}/.formura/bin` to your `PATH` and
+
+```
+formura --version
+```
+
+# Install
+## Download binary (`x86_64`)
+Ubuntu 18.04, CentOS 7, Mac, WSL
+
+```
+curl -sSfL https://raw.githubusercontent.com/formura/formura/master/install.sh | sh
+```
 
 ## Using docker
 ### Pull the image of formura
