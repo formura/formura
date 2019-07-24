@@ -2,7 +2,7 @@
 
 set -e
 
-formura_version=v2.3.1-test
+formura_version=v2.3.2
 
 case "$(uname -s)" in
   Linux)
@@ -17,8 +17,7 @@ case "$(uname -s)" in
     ;;
 esac
 
-#formura=formura_${os}_${formura_version}
-formura=formura_${os}
+formura=formura_${os}_${formura_version}
 formura_bin_dir=$HOME/.formura/bin
 url="https://github.com/formura/formura/releases/download/${formura_version}/${formura}"
 

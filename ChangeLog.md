@@ -1,4 +1,8 @@
 # Changelog for formura
+## version 2.3.2
+
+- Add install.sh
+
 ## version 2.3.1
 
 - Improve compilation performance
