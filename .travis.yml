@@ -54,11 +54,12 @@ before_deploy:
   else
     export OS_NAME=linux
   fi
-  cp bin/formura bin/formura_$OS_NAME
+  export FORMURA=formura_${OS_NAME}_${TRAVIS_TAG}
+  cp bin/formura bin/$FORMURA
 deploy:
   provider: releases
   api_key: $RELEASE_KEY
-  file: bin/formura_$OS_NAME
+  file: bin/$FORMURA
   skip_cleanup: true
   on:
     tags: true
