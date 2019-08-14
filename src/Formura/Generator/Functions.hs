@@ -1,61 +1,61 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE TypeApplications  #-}
 module Formura.Generator.Functions where
 
-import Control.Lens
-import Control.Monad
+import           Control.Lens
+import           Control.Monad
 import qualified Data.HashMap.Lazy as HM
-import Data.Maybe (maybeToList)
-import Data.List (intercalate, sort, nub)
-import Data.Traversable (for)
-import Text.Printf (printf)
+import           Data.List (intercalate, nub, sort)
+import           Data.Maybe (maybeToList)
+import           Data.Traversable (for)
+import           Text.Printf (printf)
 
-import Formura.NumericalConfig
-import Formura.GlobalEnvironment
-import Formura.OrthotopeMachine.Graph
 import Formura.Generator.Types
+import Formura.GlobalEnvironment
+import Formura.IR
+import Formura.NumericalConfig
 
 withMPI :: ([Int] -> BuildM ()) -> BuildM ()
 withMPI f = do
-  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
+  mmpiShape <- view (globalEnvironment . envNumericalConfig . icMPIShape)
   case mmpiShape of
-    Nothing -> return ()
+    Nothing       -> return ()
     Just mpiShape -> f mpiShape
 
 withOMP :: BuildM () -> BuildM ()
 withOMP f = do
-  omp <- view (omGlobalEnvironment . envNumericalConfig . icWithOmp)
+  omp <- view (globalEnvironment . envNumericalConfig . icWithOmp)
   when (omp > 0) $ f
 
-withFirstStep :: (MMGraph -> BuildM ()) -> BuildM ()
+withFirstStep :: (IRGraph -> BuildM ()) -> BuildM ()
 withFirstStep f = do
-  mfirstStepGraph <- view omFirstStepGraph
+  mfirstStepGraph <- view irFirstStepGraph
   case mfirstStepGraph of
     Nothing -> return ()
-    Just g -> f g
+    Just g  -> f g
 
-withFilter :: (MMGraph -> BuildM ()) -> BuildM ()
+withFilter :: (IRGraph -> BuildM ()) -> BuildM ()
 withFilter f = do
-  mfilterGraph <- view omFilterGraph
+  mfilterGraph <- view irFilterGraph
   case mfilterGraph of
     Nothing -> return ()
-    Just g -> f g
+    Just g  -> f g
 
 getBlockOffsets :: BuildM [(CType,String)]
 getBlockOffsets = do
-  dim <- view (omGlobalEnvironment . dimension)
+  dim <- view (globalEnvironment . dimension)
   return [(CInt, "block_offset_" ++ show i) | i <- [1..dim]]
 
 getSleeves :: BuildM [Int]
 getSleeves = do
-  step <- view (omGlobalEnvironment . envNumericalConfig . icSleeve)
-  first <- maybeToList <$> view (omGlobalEnvironment . envNumericalConfig . icSleeve0)
-  filter' <- maybeToList <$> view (omGlobalEnvironment . envNumericalConfig . icFilterSleeve)
-  bt <- view (omGlobalEnvironment . envNumericalConfig . icBlockingType)
+  step <- view (globalEnvironment . envNumericalConfig . icSleeve)
+  first <- maybeToList <$> view (globalEnvironment . envNumericalConfig . icSleeve0)
+  filter' <- maybeToList <$> view (globalEnvironment . envNumericalConfig . icFilterSleeve)
+  bt <- view (globalEnvironment . envNumericalConfig . icBlockingType)
   let s = case bt of
-           NoBlocking -> [step]
+           NoBlocking              -> [step]
            TemporalBlocking _ _ nt -> [step*nt]
   return $ nub $ sort $ s ++ first ++ filter'
 
@@ -84,11 +84,11 @@ getVariable k = do
   vs <- use variables
   case vs ^? ix k of
     Nothing -> error $ "Error: getVariable " ++ k
-    Just v -> return v
+    Just v  -> return v
 
 getGlobalData :: BuildM CVariable
 getGlobalData = do
-  insntaceName <- view (omGlobalEnvironment . gridStructInstanceName)
+  insntaceName <- view (globalEnvironment . gridStructInstanceName)
   getVariable insntaceName
 
 addHeader :: String -> BuildM ()
@@ -112,18 +112,18 @@ redeftype :: Kind -> [(String,CType)] -> [(String,CType)]
 redeftype Normal fs = fs
 redeftype (AoS _) fs = [(n, unwrap t) | (n, t) <- fs]
   where unwrap (CArray _ t) = t
-        unwrap t = t
+        unwrap t            = t
 redeftype (SoA s) fs = [(n, wrap s t) | (n, t) <- fs]
   where wrap s0 (CArray _ t) = CArray s0 t
-        wrap s0 t = CArray s0 t
+        wrap s0 t            = CArray s0 t
 
 defTypeStruct :: (Lens' CodeStructure [CTypedef]) -> String -> [(String, CType)] -> Kind -> BuildM CType
 defTypeStruct setter n fs k = do
   let fs' = redeftype k fs
   let t = case k of
             Normal -> CStruct n fs'
-            AoS s -> CArray s (CStruct n fs')
-            SoA _ -> CStruct n fs'
+            AoS s  -> CArray s (CStruct n fs')
+            SoA _  -> CStruct n fs'
   scribe setter [CTypedefStruct fs' n]
   return t
 
@@ -183,7 +183,7 @@ getSize :: CType -> [Int]
 getSize (CPtr t) = getSize t
 getSize (CArray s _) = s
 getSize (CStruct _ ((_,(CArray s _)):_)) = s
-getSize _ = error "Error at Formura.Generator.Functions.getSize" 
+getSize _ = error "Error at Formura.Generator.Functions.getSize"
 
 getFields :: CVariable -> [String]
 getFields (CVariable _ t _ _) =
@@ -200,13 +200,13 @@ mkIdent f (CVariable n t _ _) idx
   | otherwise = error "Error at Formura.Generator.Functions.mkIdent"
   where
     isArray (CArray _ _) = True
-    isArray _ = False
+    isArray _            = False
     isSoA (CStruct _ fs) = all (isArray . snd) fs
-    isSoA _ = False
+    isSoA _              = False
     isSoA' (CPtr t0) = isSoA t0
-    isSoA' _ = False
+    isSoA' _         = False
     isAoS (CArray _ (CStruct _ _)) = True
-    isAoS _ = False
+    isAoS _                        = False
 
 formatInt :: Int -> String
 formatInt x = if x == 0 then "" else printf "%+d" x
@@ -269,9 +269,9 @@ sendrecv src tgt s = do
 
 isendrecv :: CVariable -> Int -> BuildM ([CVariable],[CVariable],[CVariable])
 isendrecv src s = do
-  mmpiShape <- view (omGlobalEnvironment . envNumericalConfig . icMPIShape)
-  bases <- view (omGlobalEnvironment . commBases)
-  gridPerNode <- view (omGlobalEnvironment . envNumericalConfig . icGridPerNode)
+  mmpiShape <- view (globalEnvironment . envNumericalConfig . icMPIShape)
+  bases <- view (globalEnvironment . commBases)
+  gridPerNode <- view (globalEnvironment . envNumericalConfig . icGridPerNode)
   fmap unzip3 $ for bases $ \b -> do
     sendbuf <- getSendBuf s b
     recvbuf <- getRecvBuf s b
@@ -283,7 +283,7 @@ isendrecv src s = do
 
 waitAndCopy :: ([CVariable],[CVariable],[CVariable]) -> CVariable -> Int -> BuildM ()
 waitAndCopy (sendReqs,recvReqs,recvBufs) tgt s = do
-  bases <- view (omGlobalEnvironment . commBases)
+  bases <- view (globalEnvironment . commBases)
   withMPI $ \_ -> do
     mapM_ wait sendReqs
     mapM_ wait recvReqs
@@ -317,9 +317,9 @@ ref (CVariable n t _ _) | isArray t = n
                         | otherwise = "&" ++ n
   where
     isArray (CArray _ _) = True
-    isArray _ = False
+    isArray _            = False
     isPtr (CPtr _) = True
-    isPtr _ = False
+    isPtr _        = False
 
 raw :: String -> BuildM ()
 raw c = do

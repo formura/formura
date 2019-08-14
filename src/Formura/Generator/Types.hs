@@ -1,19 +1,19 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
 module Formura.Generator.Types where
 
-import Control.Lens
-import Control.Monad.RWS
+import           Control.Lens
+import           Control.Monad.RWS
 import qualified Data.HashMap.Lazy as HM
 
-import Formura.OrthotopeMachine.Graph
+import Formura.IR
 
 data CType = CVoid
            | CInt
@@ -32,9 +32,9 @@ data Kind = Normal
           | SoA [Int]
 
 data CVariable = CVariable
-  { variableName :: String
-  , variableType :: CType
-  , variableValue :: Maybe String
+  { variableName     :: String
+  , variableType     :: CType
+  , variableValue    :: Maybe String
   , variableLifetime :: Maybe String
   }
 
@@ -47,19 +47,19 @@ data CStatement = Decl CVariable
 data CFunction = CFunction
   { functionName :: String
   , returnedType :: CType
-  , arguments :: [(CType,String)]
+  , arguments    :: [(CType,String)]
   , functionBody :: [CStatement]
   }
 
 data CodeStructure = CodeStructure
-  { _headers :: [String]
-  , _definedParams :: [String]
+  { _headers         :: [String]
+  , _definedParams   :: [String]
   , _globalVariables :: [CVariable]
-  , _localVariables :: [CVariable]
-  , _globalTypes :: [CTypedef]
-  , _localTypes :: [CTypedef]
+  , _localVariables  :: [CVariable]
+  , _globalTypes     :: [CTypedef]
+  , _localTypes      :: [CTypedef]
   , _globalFunctions :: [CFunction]
-  , _localFunctions :: [CFunction]
+  , _localFunctions  :: [CFunction]
   }
 
 makeLenses ''CodeStructure
@@ -72,16 +72,16 @@ instance Monoid CodeStructure where
   mempty = CodeStructure [] [] [] [] [] [] [] []
 
 data Table = Table
-  { _stack :: [CStatement]
+  { _stack     :: [CStatement]
   , _variables :: HM.HashMap String CVariable
-  , _target :: [(String,CType)]
+  , _target    :: [(String,CType)]
   }
 
 makeLenses ''Table
 
-type BuildM = RWS MMProgram CodeStructure Table
+type BuildM = RWS IRProgram CodeStructure Table
 
-genCodeStructure :: MMProgram -> BuildM () -> CodeStructure
-genCodeStructure mm f = snd $ evalRWS f mm t0
+genCodeStructure :: IRProgram -> BuildM () -> CodeStructure
+genCodeStructure ir f = snd $ evalRWS f ir t0
   where t0 = Table [] HM.empty []
 
