@@ -416,11 +416,12 @@ genKernel args isTmp inputSize (s, Node mm _ _) =
 genMicroInst :: [CVariable] -> Idx -> Int -> MMNodeID -> MicroInstruction -> MicroNodeType -> (String -> Bool) -> BuildM ()
 genMicroInst args idx _ _ (Store n x) _ isTmp | isTmp n = stack <>= [(n ++ show idx) @= formatNode x]
                                               | otherwise = stack <>= [(mkIdent n (args !! 1) idx) @= formatNode x]
-genMicroInst args idx s mmid mi mt _ = do
+genMicroInst args idx s mmid mi mt isTmp = do
   axes <- view (globalEnvironment . axesNames)
   let decl x = declScopedVariable Nothing (mapType mt) (formatNode mmid) (Just x) >> return ()
   decl $ case mi of
-    (LoadCursorStatic d n) -> mkIdent n (args !! 0) (idx <> (toIdx . toList $ d + pure s))
+    (LoadCursorStatic d n) | isTmp n   -> n ++ show (idx <> (toIdx . toList $ d))
+                           | otherwise -> mkIdent n (args !! 0) (idx <> (toIdx . toList $ d + pure s))
     -- (LoadCursor d oid) -> tmpName oid ++ show (idx <> (toIdx . toList $ d + pure (s-(sizeTable M.! oid))))
     (Imm r) -> show (realToFrac r :: Double)
     (Uniop op a) | "external-call" `isPrefixOf` op -> (fromJust $ stripPrefix "external-call/" op) ++ "(" ++ formatNode a ++ ")"
