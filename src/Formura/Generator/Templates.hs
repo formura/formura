@@ -420,7 +420,7 @@ genMicroInst args idx s mmid mi mt isTmp = do
   axes <- view (globalEnvironment . axesNames)
   let decl x = declScopedVariable Nothing (mapType mt) (formatNode mmid) (Just x) >> return ()
   decl $ case mi of
-    (LoadCursorStatic d n) | isTmp n   -> n ++ show (idx <> (toIdx . toList $ d))
+    (LoadCursorStatic d n) | isTmp n   -> n ++ show (idx <> (toIdx . toList $ d + pure s))
                            | otherwise -> mkIdent n (args !! 0) (idx <> (toIdx . toList $ d + pure s))
     -- (LoadCursor d oid) -> tmpName oid ++ show (idx <> (toIdx . toList $ d + pure (s-(sizeTable M.! oid))))
     (Imm r) -> show (realToFrac r :: Double)
