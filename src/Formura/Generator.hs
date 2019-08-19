@@ -1,27 +1,27 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ImplicitParams  #-}
+{-# LANGUAGE ImplicitParams   #-}
+{-# LANGUAGE TemplateHaskell  #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies     #-}
 module Formura.Generator where
 
 import Control.Lens hiding (op)
 import System.Directory
 
 import Formura.CommandLineOption
-import Formura.GlobalEnvironment
 import Formura.Generator.Encode
-import Formura.Generator.Types
 import Formura.Generator.Templates
+import Formura.Generator.Types
+import Formura.GlobalEnvironment
+import Formura.IR
 import Formura.NumericalConfig
-import Formura.OrthotopeMachine.Graph
 
-genCode :: WithCommandLineOption => MMProgram -> IO ()
-genCode mm = do
-  let ic = mm ^. omGlobalEnvironment . envNumericalConfig
+genCode :: WithCommandLineOption => IRProgram -> IO ()
+genCode ir = do
+  let ic = ir ^. globalEnvironment . envNumericalConfig
   let totalMPI = product <$> ic ^. icMPIShape
 
-  let cs = genCodeStructure mm scaffold
+  let cs = genCodeStructure ir scaffold
       (hContent, cContent) = render hxxFilePath cs
 
   let runningScriptPath = "run"

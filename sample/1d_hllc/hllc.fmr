@@ -113,8 +113,8 @@ begin function F_HLLC = HLLC_Flux((rho_L, rhoV_L, e_L), (rho_R, rhoV_R, e_R))
   (V_R, p_R) = calc_primitive(rho_R, rhoV_R, e_R)
   u_L = extract_x(V_L)
   u_R = extract_x(V_R)
-  manifest :: (S_L, S_R) = fastest_signal_speed((rho_L, p_L, u_L), (rho_R, p_R, u_R))
-  manifest :: S_M = middle_speed((S_L, rho_L, p_L, u_L), (S_R, rho_R, p_R, u_R))
+  (S_L, S_R) = fastest_signal_speed((rho_L, p_L, u_L), (rho_R, p_R, u_R))
+  S_M = middle_speed((S_L, rho_L, p_L, u_L), (S_R, rho_R, p_R, u_R))
   p_st = pressure_star((S_L, rho_L, p_L, u_L), (S_R, rho_R, p_R, u_R))
   (rho_stL, V_stL, e_stL) = state_star(S_M, p_st, S_L, rho_L, V_L, e_L, p_L)
   (rho_stR, V_stR, e_stR) = state_star(S_M, p_st, S_R, rho_R, V_R, e_R, p_R)
@@ -150,10 +150,10 @@ end function
 
 ## second-order accurate TVD-MUSCL method
 begin function (U_xL, U_xR) = MUSCL_Hancock(U)
-  manifest :: (UR_x, UL_x) = TVD_MUSCL(U, Xb, Xf)
+  (UR_x, UL_x) = TVD_MUSCL(U, Xb, Xf)
   FL = Flux_fromU(UL_x)
   FR = Flux_fromU(UR_x)
-  manifest :: DivF = (FR - FL)/dx
+  DivF = (FR - FL)/dx
   (U_xL, U_xR) = left_right_state(UR_x, UL_x, DivF, Xb, Xf)
 end function
 
@@ -165,7 +165,7 @@ begin function U_next = step(rho, (rhou, rhov, rhow), e)
   U = (rho, (rhou, rhov, rhow), e)
   #(U_xL, U_xR) = first_order_LR(U)   # first-order scheme
   (U_xL, U_xR) = MUSCL_Hancock(U)   # second-order scheme
-  manifest :: F = HLLC_Flux(U_xL, U_xR)
+  F = HLLC_Flux(U_xL, U_xR)
   U_next = time_evol(U, F)
 end function
 
