@@ -112,6 +112,7 @@ calcRange = M.foldlWithKey (\acc k (Node mi _ _) -> M.insert k (worker mi acc) a
       where go rng (Node (LoadCursorStatic s _) _ _) = rng <> fromCursor s
             go rng (Node (LoadCursor s oid) _ _) = rng <> mergeRange (fromCursor s) (tbl M.! oid)
             go rng _ = rng
+
 maximum' :: (Num a, Ord a) => [a] -> a
 maximum' [] = 0
 maximum' x = maximum x

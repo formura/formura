@@ -393,7 +393,7 @@ mkKernel irg sleeve args = do
   let outputSize = getSize $ variableType $ args !! 1
       inputSize = map (+ (2*sleeve)) outputSize
   defTmpArrays inputSize tmps
-  for_ (M.toAscList ks) $ \(_,mm) -> genKernel args isTmp inputSize mm
+  for_ (M.toDescList ks) $ \(_,mm) -> genKernel args isTmp inputSize mm
 
 defTmpArrays :: [Int] -> [(String,OMNodeType,Int)] -> BuildM ()
 defTmpArrays inputSize ts = for_ ts $ \(n,t,s) ->
