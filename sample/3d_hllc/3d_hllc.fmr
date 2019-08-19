@@ -126,8 +126,8 @@ begin function F_HLLC = HLLC_Flux((rho_L, rhoV_L, e_L), (rho_R, rhoV_R, e_R))
   (V_R, p_R) = calc_primitive(rho_R, rhoV_R, e_R)
   u_L = extract_x(V_L)
   u_R = extract_x(V_R)
-  manifest :: (S_L, S_R) = fastest_signal_speed((rho_L, p_L, u_L), (rho_R, p_R, u_R))
-  manifest :: S_M = middle_speed((S_L, rho_L, p_L, u_L), (S_R, rho_R, p_R, u_R))
+  (S_L, S_R) = fastest_signal_speed((rho_L, p_L, u_L), (rho_R, p_R, u_R))
+  S_M = middle_speed((S_L, rho_L, p_L, u_L), (S_R, rho_R, p_R, u_R))
   p_st = pressure_star((S_L, rho_L, p_L, u_L), (S_R, rho_R, p_R, u_R))
   (rho_stL, V_stL, e_stL) = state_star(S_M, p_st, S_L, rho_L, V_L, e_L, p_L)
   (rho_stR, V_stR, e_stR) = state_star(S_M, p_st, S_R, rho_R, V_R, e_R, p_R)
@@ -186,16 +186,16 @@ end function
 
 ## second-order accurate TVD-MUSCL method
 begin function (U_xL, U_xR, U_yL, U_yR, U_zL, U_zR) = MUSCL_Hancock(U)
-  manifest :: (UR_x, UL_x) = TVD_MUSCL(U, Xb, Xf)
-  manifest :: (UR_y, UL_y) = TVD_MUSCL(U, Yb, Yf)
-  manifest :: (UR_z, UL_z) = TVD_MUSCL(U, Zb, Zf)
+  (UR_x, UL_x) = TVD_MUSCL(U, Xb, Xf)
+  (UR_y, UL_y) = TVD_MUSCL(U, Yb, Yf)
+  (UR_z, UL_z) = TVD_MUSCL(U, Zb, Zf)
   FL = Flux_x_fromU(UL_x)
   FR = Flux_x_fromU(UR_x)
   GL = Flux_y_fromU(UL_y)
   GR = Flux_y_fromU(UR_y)
   HL = Flux_z_fromU(UL_z)
   HR = Flux_z_fromU(UR_z)
-  manifest :: DivF = (FR - FL)/dx + (GR - GL)/dy + (HR - HL)/dz
+  DivF = (FR - FL)/dx + (GR - GL)/dy + (HR - HL)/dz
   (U_xL, U_xR) = left_right_state(UR_x, UL_x, DivF, Xb, Xf)
   (U_yL, U_yR) = left_right_state(UR_y, UL_y, DivF, Yb, Yf)
   (U_zL, U_zR) = left_right_state(UR_z, UL_z, DivF, Zb, Zf)
@@ -209,9 +209,9 @@ begin function U_next = step(rho, (rhou, rhov, rhow), e)
   U = (rho, (rhou, rhov, rhow), e)
   #(U_xL, U_xR, U_yL, U_yR, U_zL, U_zR) = first_order_LR(U)   # first-order scheme
   (U_xL, U_xR, U_yL, U_yR, U_zL, U_zR) = MUSCL_Hancock(U)   # second-order scheme
-  manifest :: F = HLLC_Flux_x(U_xL, U_xR)
-  manifest :: G = HLLC_Flux_y(U_yL, U_yR)
-  manifest :: H = HLLC_Flux_z(U_zL, U_zR)
+  F = HLLC_Flux_x(U_xL, U_xR)
+  G = HLLC_Flux_y(U_yL, U_yR)
+  H = HLLC_Flux_z(U_zL, U_zR)
   U_next = time_evol(U, F, G, H)
 end function
 
