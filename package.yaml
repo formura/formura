@@ -17,24 +17,31 @@ dependencies:
 - ansi-wl-pprint
 - bytestring
 - containers
+- filepath
 - lens
 - mtl
 - scientific
 - text
 - trifecta
 - yaml
+- unordered-containers
 
 library:
   source-dirs: src
+  build-tools:
+    - alex
+    - happy
   ghc-options:
   - -fsimpl-tick-factor=326680
   dependencies:
+  - array
   - binary-search >=1.0.0.3
   - blaze-markup
   - cases
   - directory
   - filepath
   - gitrev
+  - hashable
   - lattices
   - mmorph
   - optparse-applicative
@@ -46,12 +53,18 @@ library:
   - temporary
   - tostring
   - transformers
-  - unordered-containers
   - vector
 
 executables:
   formura:
     main: formura.hs
+    source-dirs: app
+    ghc-options:
+    - -rtsopts
+    dependencies:
+    - formura
+  formura0:
+    main: formura0.hs
     source-dirs: app
     ghc-options:
     - -rtsopts
